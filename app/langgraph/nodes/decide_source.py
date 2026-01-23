@@ -112,7 +112,11 @@ def detect_intent_keywords(query: str) -> Optional[str]:
     # RMS keywords
     rms_keywords = [
         'candidate', 'candidates', 'recruitment', 'job', 'jobs',
-        'position', 'positions', 'rms', 'rms candidate', 'rms candidates'
+        'position', 'positions', 'rms', 'rms candidate', 'rms candidates',
+        'job opening', 'job openings', 'opening', 'openings', 'vacancy', 'vacancies',
+        'interview', 'interviews', 'screening', 'screenings',
+        'company', 'companies', 'organization', 'organizations', 'employer', 'employers',
+        'hiring', 'hiring manager', 'recruiter', 'recruiters'
     ]
     
     # RAG keywords
@@ -188,7 +192,7 @@ def decide_source_node(state: AgentState) -> Dict[str, Any]:
         Categories:
         - "crm": All CRM data including Leads, Trainers, Learners, Campaigns, Tasks, Activities, Notes, Courses
         - "lms": Training batches and batch schedules only (NOT trainers or learners - those are in CRM)
-        - "rms": Candidate/Job/Recruitment data
+        - "rms": Candidate/Job/Recruitment data including Job Openings, Candidates, Companies, Interviews, and RMS Tasks
         - "rag": Policy/Knowledge base/Documents
         - "general": Off-topic or unclear requests
         
@@ -197,6 +201,8 @@ def decide_source_node(state: AgentState) -> Dict[str, Any]:
         2. Learners/Students → ALWAYS "crm" (NOT "lms")
         3. Courses → "crm" (Course table is in CRM)
         4. Only training batches/schedules → "lms"
+        5. Job openings, positions, vacancies, candidates, interviews, companies → "rms"
+        6. Tasks in recruitment context → "rms", otherwise "crm"
         
         Return ONLY the category name.
         """
