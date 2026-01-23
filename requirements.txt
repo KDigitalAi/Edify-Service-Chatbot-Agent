@@ -20,5 +20,5 @@ pytest==8.1.1
 pypdf==4.0.1
 
 # Optional optimization dependencies (install only if using features)
-# slowapi>=0.1.9  # For rate limiting (install: pip install slowapi)
+slowapi>=0.1.9  # For rate limiting
 # redis>=5.0.0    # For caching (install: pip install redis)

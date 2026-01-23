@@ -1,7 +1,10 @@
 from typing import Any
 import json
 import re
+import hashlib
 from app.llm.openai_client import OpenAIClient
+from app.utils.cache import get_cached, set_cached, cache_key_llm_response
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -136,8 +139,23 @@ class ResponseFormatter:
                  {context_str}
                  """
                  user_input = query
+            
+            # Optional: Try LLM response cache first (non-breaking if cache unavailable)
+            if settings.ENABLE_LLM_CACHING:
+                # Generate cache key from query and context hash
+                context_hash = hashlib.md5(json.dumps(context, default=str, sort_keys=True).encode()).hexdigest()
+                cache_key = cache_key_llm_response(query, context_hash)
+                cached_response = get_cached(cache_key)
+                if cached_response is not None:
+                    logger.debug(f"Cache hit for LLM response")
+                    # Still post-process cached response
+                    return self.fix_numbered_list(cached_response)
 
             response = self.client.generate_response(system_prompt, user_input)
+            
+            # Optional: Cache LLM response (non-breaking if cache fails)
+            if settings.ENABLE_LLM_CACHING:
+                set_cached(cache_key, response, ttl=settings.LLM_CACHE_TTL_SECONDS)
             
             # Post-process to fix numbered list formatting
             response = self.fix_numbered_list(response)

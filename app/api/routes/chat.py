@@ -14,16 +14,42 @@ logger = logging.getLogger(__name__)
 
 # Optional rate limiting decorator
 # Applied only if ENABLE_RATE_LIMITING=true and slowapi is installed
+# Uses the limiter instance from app.state (set in main.py)
+# Only applies to /chat endpoints - health and static routes are excluded
 def apply_rate_limit(func):
-    """Apply rate limiting decorator if enabled."""
+    """
+    Apply rate limiting decorator if enabled.
+    Only applies to /chat endpoints.
+    Health and static routes are excluded.
+    Internal calls (without Request) are not rate limited.
+    """
     if settings.ENABLE_RATE_LIMITING:
         try:
-            # Import here to avoid errors if slowapi not installed
             from slowapi import Limiter
             from slowapi.util import get_remote_address
-            limiter = Limiter(key_func=get_remote_address)
-            return limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")(func)
+            from functools import wraps
+            
+            # Create a decorator that uses the limiter from app.state
+            @wraps(func)
+            async def rate_limited_wrapper(request: Request, *args, **kwargs):
+                """
+                Wrapper that applies rate limiting using limiter from app.state.
+                If limiter not in app state, skip rate limiting (internal call or not configured).
+                """
+                # Get limiter from app state (set in main.py)
+                if hasattr(request.app.state, 'limiter'):
+                    limiter = request.app.state.limiter
+                    # Apply rate limit using the limiter from app state
+                    # Use the limiter's limit method directly
+                    limited_func = limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")(func)
+                    return await limited_func(request, *args, **kwargs)
+                else:
+                    # Limiter not in app state, skip rate limiting
+                    return await func(request, *args, **kwargs)
+            
+            return rate_limited_wrapper
         except ImportError:
+            # slowapi not installed, skip rate limiting
             pass
     return func
 
@@ -67,7 +93,8 @@ def get_or_create_session(session_id: str) -> Dict[str, Any]:
 @router.post("/message", response_model=ChatResponse)
 @apply_rate_limit
 async def chat_message(
-    request: ChatRequest
+    request: Request,
+    chat_request: ChatRequest
 ):
     """
     Chat message endpoint with full persistence.
@@ -77,7 +104,7 @@ async def chat_message(
     """
     try:
         # Get or create session (no auth required)
-        session_data = get_or_create_session(request.session_id)
+        session_data = get_or_create_session(chat_request.session_id)
         
         # Use the actual session_id from the created/retrieved session
         actual_session_id = session_data["session_id"]
@@ -85,7 +112,7 @@ async def chat_message(
         service = ChatService()
         response_text = await service.process_user_message(
             session_id=actual_session_id,
-            user_message=request.message,
+            user_message=chat_request.message,
             session_data=session_data
         )
         
@@ -100,7 +127,7 @@ async def chat_message(
             audit.log_action(
                 admin_id=session_data.get("admin_id", "unknown") if 'session_data' in locals() else "unknown",
                 action="chat_endpoint_error",
-                details={"error": str(e), "message": request.message[:100]},
+                details={"error": str(e), "message": chat_request.message[:100]},
                 session_id=session_data.get("session_id") if 'session_data' in locals() else None
             )
         except:

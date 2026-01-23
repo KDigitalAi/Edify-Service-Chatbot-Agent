@@ -40,18 +40,33 @@ class ChatService:
         
         try:
             # 1. Update session last_activity
-            self.session_service.update_last_activity(session_id)
+            if settings.ENABLE_ASYNC_DB:
+                await asyncio.to_thread(self.session_service.update_last_activity, session_id)
+            else:
+                self.session_service.update_last_activity(session_id)
             
             # 2. Audit log user query
-            self.audit_repo.log_action(
-                admin_id=admin_id,
-                action="user_message_received",
-                details={"message_length": len(user_message)},
-                session_id=session_id
-            )
+            if settings.ENABLE_ASYNC_DB:
+                await asyncio.to_thread(
+                    self.audit_repo.log_action,
+                    admin_id=admin_id,
+                    action="user_message_received",
+                    details={"message_length": len(user_message)},
+                    session_id=session_id
+                )
+            else:
+                self.audit_repo.log_action(
+                    admin_id=admin_id,
+                    action="user_message_received",
+                    details={"message_length": len(user_message)},
+                    session_id=session_id
+                )
             
             # 3. Load History (from chat_history table)
-            history = self.memory_repo.get_chat_history(session_id, limit=5)
+            if settings.ENABLE_ASYNC_DB:
+                history = await asyncio.to_thread(self.memory_repo.get_chat_history, session_id, 5)
+            else:
+                history = self.memory_repo.get_chat_history(session_id, limit=5)
             
             # 5. Construct Initial State (matching AgentState TypedDict)
             initial_state = {
@@ -72,15 +87,63 @@ class ChatService:
                         graph.ainvoke(initial_state),
                         timeout=settings.REQUEST_TIMEOUT_SECONDS
                     )
+                    # 7. Extract Response
+                    bot_response = result.get("response", "I'm sorry, I couldn't generate a response.")
+                    source_type = result.get("source_type")
                 except asyncio.TimeoutError:
+                    # Timeout occurred - return friendly message
                     logger.warning(f"Request timeout after {settings.REQUEST_TIMEOUT_SECONDS}s for session {session_id[:8]}...")
-                    raise Exception(f"Request timed out after {settings.REQUEST_TIMEOUT_SECONDS} seconds. Please try again.")
+                    
+                    # Log timeout to audit_logs (non-blocking, don't cancel DB writes)
+                    # Use fire-and-forget approach to avoid blocking
+                    try:
+                        if settings.ENABLE_ASYNC_DB:
+                            # Schedule audit log in background task (non-blocking)
+                            async def log_timeout_async():
+                                try:
+                                    await asyncio.to_thread(
+                                        self.audit_repo.log_action,
+                                        admin_id=admin_id,
+                                        action="request_timeout",
+                                        details={
+                                            "timeout_seconds": settings.REQUEST_TIMEOUT_SECONDS,
+                                            "user_message_length": len(user_message),
+                                            "session_id": session_id
+                                        },
+                                        session_id=session_id
+                                    )
+                                except Exception:
+                                    pass  # Don't fail if audit log fails
+                            
+                            # Create background task (fire and forget)
+                            asyncio.create_task(log_timeout_async())
+                        else:
+                            # Synchronous audit log (fire and forget)
+                            try:
+                                self.audit_repo.log_action(
+                                    admin_id=admin_id,
+                                    action="request_timeout",
+                                    details={
+                                        "timeout_seconds": settings.REQUEST_TIMEOUT_SECONDS,
+                                        "user_message_length": len(user_message),
+                                        "session_id": session_id
+                                    },
+                                    session_id=session_id
+                                )
+                            except Exception:
+                                pass  # Don't fail if audit log fails
+                    except Exception as audit_error:
+                        logger.debug(f"Failed to schedule timeout audit log: {audit_error}")
+                    
+                    # Return friendly timeout message
+                    # Note: DB writes that started before timeout will complete (they're in separate operations)
+                    bot_response = "I apologize, but your request is taking longer than expected. Please try again with a simpler query or contact support if the issue persists."
+                    source_type = None
             else:
                 result = await graph.ainvoke(initial_state)
-            
-            # 7. Extract Response
-            bot_response = result.get("response", "I'm sorry, I couldn't generate a response.")
-            source_type = result.get("source_type")
+                # 7. Extract Response
+                bot_response = result.get("response", "I'm sorry, I couldn't generate a response.")
+                source_type = result.get("source_type")
             
             # 8. Calculate response time
             response_time_ms = int((time.time() - start_time) * 1000)
@@ -88,54 +151,105 @@ class ChatService:
             # 9. Save to chat_history table (user message + assistant response pair)
             # This saves the complete conversation pair for historical tracking
             try:
-                chat_history_success = self.chat_history_repo.save_chat_history(
-                    session_id=session_id,
-                    admin_id=admin_id,
-                    user_message=user_message,
-                    assistant_response=bot_response,
-                    source_type=source_type,
-                    response_time_ms=response_time_ms,
-                    tokens_used=None  # Can be added later if token counting is implemented
-                )
+                if settings.ENABLE_ASYNC_DB:
+                    chat_history_success = await asyncio.to_thread(
+                        self.chat_history_repo.save_chat_history,
+                        session_id=session_id,
+                        admin_id=admin_id,
+                        user_message=user_message,
+                        assistant_response=bot_response,
+                        source_type=source_type,
+                        response_time_ms=response_time_ms,
+                        tokens_used=None  # Can be added later if token counting is implemented
+                    )
+                else:
+                    chat_history_success = self.chat_history_repo.save_chat_history(
+                        session_id=session_id,
+                        admin_id=admin_id,
+                        user_message=user_message,
+                        assistant_response=bot_response,
+                        source_type=source_type,
+                        response_time_ms=response_time_ms,
+                        tokens_used=None  # Can be added later if token counting is implemented
+                    )
                 
                 if chat_history_success:
                     logger.info(f"Successfully saved chat history for session {session_id[:8]}...")
                 else:
                     logger.warning(f"Failed to save chat history for session {session_id[:8]}...")
-                    self.audit_repo.log_action(
+                    if settings.ENABLE_ASYNC_DB:
+                        await asyncio.to_thread(
+                            self.audit_repo.log_action,
+                            admin_id=admin_id,
+                            action="chat_history_save_failed",
+                            details={
+                                "error": "Failed to save chat history",
+                                "session_id": session_id,
+                                "user_message_length": len(user_message),
+                                "response_length": len(bot_response)
+                            },
+                            session_id=session_id
+                        )
+                    else:
+                        self.audit_repo.log_action(
+                            admin_id=admin_id,
+                            action="chat_history_save_failed",
+                            details={
+                                "error": "Failed to save chat history",
+                                "session_id": session_id,
+                                "user_message_length": len(user_message),
+                                "response_length": len(bot_response)
+                            },
+                            session_id=session_id
+                        )
+            except Exception as chat_history_error:
+                logger.error(f"Exception while saving chat history: {chat_history_error}", exc_info=True)
+                if settings.ENABLE_ASYNC_DB:
+                    await asyncio.to_thread(
+                        self.audit_repo.log_action,
                         admin_id=admin_id,
-                        action="chat_history_save_failed",
+                        action="chat_history_save_exception",
                         details={
-                            "error": "Failed to save chat history",
-                            "session_id": session_id,
-                            "user_message_length": len(user_message),
-                            "response_length": len(bot_response)
+                            "error": str(chat_history_error),
+                            "session_id": session_id
                         },
                         session_id=session_id
                     )
-            except Exception as chat_history_error:
-                logger.error(f"Exception while saving chat history: {chat_history_error}", exc_info=True)
-                self.audit_repo.log_action(
+                else:
+                    self.audit_repo.log_action(
+                        admin_id=admin_id,
+                        action="chat_history_save_exception",
+                        details={
+                            "error": str(chat_history_error),
+                            "session_id": session_id
+                        },
+                        session_id=session_id
+                    )
+            
+            # 10. Audit log completion
+            if settings.ENABLE_ASYNC_DB:
+                await asyncio.to_thread(
+                    self.audit_repo.log_action,
                     admin_id=admin_id,
-                    action="chat_history_save_exception",
+                    action="chat_completed",
                     details={
-                        "error": str(chat_history_error),
-                        "session_id": session_id
+                        "source_type": source_type,
+                        "response_time_ms": response_time_ms,
+                        "response_length": len(bot_response)
                     },
                     session_id=session_id
                 )
-            
-            # 10. Audit log completion
-            self.audit_repo.log_action(
-                admin_id=admin_id,
-                action="chat_completed",
-                details={
-                    "source_type": source_type,
-                    "response_time_ms": response_time_ms,
-                    "response_length": len(bot_response)
-                },
-                session_id=session_id
-            )
+            else:
+                self.audit_repo.log_action(
+                    admin_id=admin_id,
+                    action="chat_completed",
+                    details={
+                        "source_type": source_type,
+                        "response_time_ms": response_time_ms,
+                        "response_length": len(bot_response)
+                    },
+                    session_id=session_id
+                )
             
             return bot_response
 
@@ -143,12 +257,21 @@ class ChatService:
             logger.error(f"Error in ChatService: {e}", exc_info=True)
             # Audit log the error
             try:
-                self.audit_repo.log_action(
-                    admin_id=admin_id,
-                    action="chat_error",
-                    details={"error": str(e), "user_message": user_message[:100]},
-                    session_id=session_id
-                )
+                if settings.ENABLE_ASYNC_DB:
+                    await asyncio.to_thread(
+                        self.audit_repo.log_action,
+                        admin_id=admin_id,
+                        action="chat_error",
+                        details={"error": str(e), "user_message": user_message[:100]},
+                        session_id=session_id
+                    )
+                else:
+                    self.audit_repo.log_action(
+                        admin_id=admin_id,
+                        action="chat_error",
+                        details={"error": str(e), "user_message": user_message[:100]},
+                        session_id=session_id
+                    )
             except:
                 pass
             raise e

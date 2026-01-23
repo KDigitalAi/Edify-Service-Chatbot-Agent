@@ -1,5 +1,8 @@
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Union
 from app.db.supabase import get_edify_supabase_client
+from app.utils.cache import get_cached, set_cached, cache_key_rms_query
+from app.utils.retry import retry_with_backoff
+from app.core.config import settings
 import logging
 from datetime import datetime, timedelta
 import re
@@ -50,6 +53,21 @@ class RMSRepo:
     
     def __init__(self):
         self.supabase = get_edify_supabase_client()
+    
+    def _get_table_columns(self, table_key: str) -> str:
+        """
+        Returns explicit column list for each RMS table based on provided schema.
+        Maintains identical behavior to select("*") by including all columns.
+        """
+        # Column lists based on exact RMS table schemas provided
+        column_map = {
+            "job_openings": "id,job_title,job_type,industry,company_id,candidates_id,salary,no_of_positions,work_experience,target_date,date_opened,required_skills,remote_job,department,city,country,state,zip_postal_code,job_description,requirements,responsibilities,benefits,hiring_manager_id,recruiter_name_id,location,about_us,job_overview,job_status,created_at,updated_at,user_id,modified_by,created_by",
+            "candidates": "id,job_title,industry,hiring_manager_id,recruiter_name_id,candidate_name,salary,skills,work_experience,email,department_name,date_of_joining,target_date,mobile,address,date_of_birth,blood_group,ssc_school_name,ssc_year_of_passing,ssc_cgpa,inter_college_name,inter_year_of_passing,inter_cgpa,degree_college_name,degree_year_of_passing,degree_cgpa,offer_letter_url,assigned_jobs,job_type,current_job_title,candidate_status,city,country,state,created_at,updated_at,user_id",
+            "companies": "id,company_name,email,phone,website,city,country,modified_by,modified_time,zip_code,company_owner_id,associated_tags,created_time,state,status,vendor_name,job_opening_list,created_at,updated_at,user_id",
+            "interviews": "id,job_title,candidate_name_id,job_opening_id,interview_date,interview_time,interview_type,interview_owner,interview_name,created_by,modified_by,status,interview_status,location,created_at,updated_at,user_id,interviewer_ids",
+            "tasks": "id,subject,due_date,priority,user_id,lead_id,batch_id,trainer_id,campaign_id,learner_id,main_task_id,created_at,updated_at,status,task_type"
+        }
+        return column_map.get(table_key, "*")  # Fallback to * if table not found
     
     def _detect_table_intent(self, query: str) -> Optional[str]:
         """
@@ -201,13 +219,31 @@ class RMSRepo:
     def _build_query(self, table_config: Dict[str, Any], filters: Dict[str, Any], limit: int = 50):
         """
         Builds and executes Supabase query based on table config and filters.
+        Optional optimization: Select specific fields if ENABLE_QUERY_OPTIMIZATION is enabled.
         """
         table_name = table_config["table"]
         search_fields = table_config["search_fields"]
         date_field = table_config["date_field"]
         order_field = table_config["order_field"]
         
-        query_builder = self.supabase.table(table_name).select("*")
+        # Optimize: Use explicit column list instead of select("*") if enabled
+        # This improves query performance while maintaining identical behavior
+        if settings.ENABLE_QUERY_OPTIMIZATION:
+            table_key = None
+            for key, config in self.TABLE_CONFIGS.items():
+                if config["table"] == table_name:
+                    table_key = key
+                    break
+            
+            if table_key:
+                select_fields = self._get_table_columns(table_key)
+                query_builder = self.supabase.table(table_name).select(select_fields)
+            else:
+                # Fallback to * if table not found in config
+                query_builder = self.supabase.table(table_name).select("*")
+        else:
+            # Default behavior: use select("*") when optimization disabled
+            query_builder = self.supabase.table(table_name).select("*")
         
         # Apply date filters if present
         if filters["start_date"] and filters["end_date"]:
@@ -246,22 +282,51 @@ class RMSRepo:
         query_builder = query_builder.order(order_field, desc=True)
         
         # Apply limit
-        response = query_builder.limit(limit).execute()
+        # Optional: Retry with exponential backoff if enabled (behind flag, disabled by default)
+        if settings.ENABLE_QUERY_RETRY:
+            def execute_query():
+                return query_builder.limit(limit).execute()
+            
+            try:
+                response = retry_with_backoff(
+                    execute_query,
+                    exceptions=(Exception,)
+                )
+            except Exception as retry_error:
+                logger.error(f"Query retry exhausted: {retry_error}")
+                raise retry_error
+        else:
+            response = query_builder.limit(limit).execute()
         
         return response.data if response.data else []
     
-    def search_rms(self, query: str) -> List[Dict[str, Any]]:
+    def search_rms(
+        self, 
+        query: str, 
+        page: Optional[int] = None, 
+        page_size: Optional[int] = None
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Searches RMS data across all supported tables.
         Automatically detects which table to query based on user intent.
         Returns raw verified data from Supabase.
+        Optional caching: Uses cache if enabled (non-breaking).
+        Optional pagination: If page/page_size provided, returns paginated response.
         
         Args:
             query: Search query string (can include table name, date keywords, text search)
+            page: Optional page number (1-indexed). If provided with page_size, returns paginated response.
+            page_size: Optional number of records per page. If provided with page, returns paginated response.
             
         Returns:
-            List of RMS records (raw data from Supabase)
+            If page/page_size provided: Dict with keys: data, total, page, page_size, has_more
+            Otherwise: List of RMS records (raw data from Supabase) - DEFAULT BEHAVIOR
         """
+        # If pagination params provided, use paginated method
+        if page is not None and page_size is not None:
+            return self.search_rms_paginated(query, page=page, page_size=page_size)
+        
+        # DEFAULT BEHAVIOR: No pagination - return List (existing behavior)
         try:
             # Detect which table to query
             table_key = self._detect_table_intent(query)
@@ -269,11 +334,24 @@ class RMSRepo:
             
             logger.info(f"Detected RMS table: {table_key} (table: {table_config['table']})")
             
-            # Parse filters
+            # READ-THROUGH: Try cache first (non-breaking if cache unavailable)
+            cache_key = cache_key_rms_query(query, table_key, limit=50)
+            if settings.ENABLE_CACHING:
+                cached = get_cached(cache_key)
+                if cached is not None:
+                    logger.debug(f"Cache hit for RMS query: {table_key}")
+                    return cached
+            
+            # Cache miss: Parse filters and query database
             filters = self._parse_date_filters(query)
             
             # Build and execute query
             data = self._build_query(table_config, filters, limit=50)
+            
+            # READ-THROUGH: Cache successful read result (TTL: 5 minutes = 300 seconds)
+            # Only cache if we got data (successful read)
+            if settings.ENABLE_CACHING and data:
+                set_cached(cache_key, data, ttl=300)
             
             logger.info(f"Retrieved {len(data)} records from {table_config['table']}")
             return data
@@ -290,6 +368,131 @@ class RMSRepo:
             except Exception as fallback_error:
                 logger.error(f"Fallback search also failed: {fallback_error}", exc_info=True)
                 return []
+    
+    def search_rms_paginated(
+        self, 
+        query: str, 
+        page: int = 1, 
+        page_size: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Paginated RMS search (does not change existing search_rms).
+        Returns paginated results with metadata.
+        
+        Args:
+            query: Search query string
+            page: Page number (1-indexed)
+            page_size: Number of records per page (defaults to settings.DEFAULT_PAGE_SIZE)
+            
+        Returns:
+            Dict with keys: data, total, page, page_size, has_more
+        """
+        from app.core.config import settings
+        
+        if page < 1:
+            page = 1
+        if page_size is None:
+            page_size = settings.DEFAULT_PAGE_SIZE
+        if page_size > settings.MAX_PAGE_SIZE:
+            page_size = settings.MAX_PAGE_SIZE
+        
+        offset = (page - 1) * page_size
+        
+        try:
+            # Detect which table to query
+            table_key = self._detect_table_intent(query)
+            table_config = self.TABLE_CONFIGS[table_key]
+            
+            logger.info(f"Paginated search - table: {table_key}, page: {page}, page_size: {page_size}")
+            
+            # READ-THROUGH: Try cache first (non-breaking if cache unavailable)
+            cache_key = cache_key_rms_query(query, table_key, page=page, page_size=page_size)
+            if settings.ENABLE_CACHING:
+                cached = get_cached(cache_key)
+                if cached is not None:
+                    logger.debug(f"Cache hit for paginated RMS query: {table_key}, page {page}")
+                    return cached
+            
+            # Cache miss: Parse filters and query database
+            filters = self._parse_date_filters(query)
+            
+            # Build query with pagination
+            table_name = table_config["table"]
+            search_fields = table_config["search_fields"]
+            date_field = table_config["date_field"]
+            order_field = table_config["order_field"]
+            
+            # Optimize: Use explicit column list instead of select("*") if enabled
+            if settings.ENABLE_QUERY_OPTIMIZATION:
+                select_fields = self._get_table_columns(table_key)
+                query_builder = self.supabase.table(table_name).select(select_fields, count="exact")
+            else:
+                # Default behavior: use select("*") when optimization disabled
+                query_builder = self.supabase.table(table_name).select("*", count="exact")
+            
+            # Apply filters (same logic as _build_query)
+            if filters["start_date"] and filters["end_date"]:
+                start_iso = filters["start_date"].isoformat()
+                end_iso = filters["end_date"].isoformat()
+                query_builder = query_builder.gte(date_field, start_iso)
+                query_builder = query_builder.lte(date_field, end_iso)
+            
+            text_query_applied = False
+            if filters.get("text_query"):
+                text_query = filters["text_query"].strip()
+                common_words = {'out', 'the', 'all', 'me', 'my', 'i', 'a', 'an', 'is', 'are', 'was', 'were', 'in', 'of', 'for', 'to', 'with'}
+                if len(text_query) > 2 and text_query.lower() not in common_words:
+                    or_conditions = ",".join([f"{field}.ilike.%{text_query}%" for field in search_fields])
+                    query_builder = query_builder.or_(or_conditions)
+                    text_query_applied = True
+            
+            # Apply pagination
+            query_builder = query_builder.order(order_field, desc=True)
+            
+            # Optional: Retry with exponential backoff if enabled (behind flag, disabled by default)
+            if settings.ENABLE_QUERY_RETRY:
+                def execute_paginated_query():
+                    return query_builder.range(offset, offset + page_size - 1).execute()
+                
+                try:
+                    response = retry_with_backoff(
+                        execute_paginated_query,
+                        exceptions=(Exception,)
+                    )
+                except Exception as retry_error:
+                    logger.error(f"Paginated query retry exhausted: {retry_error}")
+                    raise retry_error
+            else:
+                response = query_builder.range(offset, offset + page_size - 1).execute()
+            
+            data = response.data if response.data else []
+            total = response.count if hasattr(response, 'count') and response.count is not None else len(data)
+            has_more = (offset + page_size) < total
+            
+            result = {
+                "data": data,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "has_more": has_more
+            }
+            
+            # READ-THROUGH: Cache successful read result (TTL: 5 minutes = 300 seconds)
+            # Only cache if we got data (successful read)
+            if settings.ENABLE_CACHING and data:
+                set_cached(cache_key, result, ttl=300)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in paginated RMS search: {e}", exc_info=True)
+            return {
+                "data": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "has_more": False
+            }
     
     def get_all_job_openings(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get all job openings."""

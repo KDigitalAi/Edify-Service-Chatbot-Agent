@@ -75,6 +75,25 @@ class Settings(BaseModel):
     # Pagination
     DEFAULT_PAGE_SIZE: int = 50
     MAX_PAGE_SIZE: int = 200
+    
+    # Query Optimization (disabled by default)
+    ENABLE_QUERY_OPTIMIZATION: bool = False  # Select specific fields instead of *
+    ENABLE_QUERY_RETRY: bool = False  # Retry failed queries with exponential backoff
+    QUERY_RETRY_MAX_ATTEMPTS: int = 3
+    QUERY_RETRY_INITIAL_DELAY_MS: int = 100
+    
+    # LLM Response Caching (disabled by default)
+    ENABLE_LLM_CACHING: bool = False
+    LLM_CACHE_TTL_SECONDS: int = 3600  # 1 hour default
+    
+    # Parallel Operations (disabled by default)
+    ENABLE_PARALLEL_FETCHING: bool = False  # Fetch from multiple sources in parallel
+    
+    # Async DB Operations (disabled by default)
+    ENABLE_ASYNC_DB: bool = False  # Execute synchronous DB calls in thread pool
+    
+    # Async Writes (disabled by default)
+    ENABLE_ASYNC_WRITES: bool = False  # Move context saving off main request path using background tasks
 
 settings = Settings(
     OPENAI_API_KEY=os.getenv("OPENAI_API_KEY", ""),
@@ -102,4 +121,18 @@ settings = Settings(
     ENABLE_COMPRESSION=_parse_bool(os.getenv("ENABLE_COMPRESSION", "false")),
     DEFAULT_PAGE_SIZE=_parse_int(os.getenv("DEFAULT_PAGE_SIZE", "50"), 50),
     MAX_PAGE_SIZE=_parse_int(os.getenv("MAX_PAGE_SIZE", "200"), 200),
+    # Query optimization flags (disabled by default)
+    ENABLE_QUERY_OPTIMIZATION=_parse_bool(os.getenv("ENABLE_QUERY_OPTIMIZATION", "false")),
+    ENABLE_QUERY_RETRY=_parse_bool(os.getenv("ENABLE_QUERY_RETRY", "false")),
+    QUERY_RETRY_MAX_ATTEMPTS=_parse_int(os.getenv("QUERY_RETRY_MAX_ATTEMPTS", "3"), 3),
+    QUERY_RETRY_INITIAL_DELAY_MS=_parse_int(os.getenv("QUERY_RETRY_INITIAL_DELAY_MS", "100"), 100),
+    # LLM caching (disabled by default)
+    ENABLE_LLM_CACHING=_parse_bool(os.getenv("ENABLE_LLM_CACHING", "false")),
+    LLM_CACHE_TTL_SECONDS=_parse_int(os.getenv("LLM_CACHE_TTL_SECONDS", "3600"), 3600),
+    # Parallel operations (disabled by default)
+    ENABLE_PARALLEL_FETCHING=_parse_bool(os.getenv("ENABLE_PARALLEL_FETCHING", "false")),
+    # Async DB operations (disabled by default)
+    ENABLE_ASYNC_DB=_parse_bool(os.getenv("ENABLE_ASYNC_DB", "false")),
+    # Async writes (disabled by default)
+    ENABLE_ASYNC_WRITES=_parse_bool(os.getenv("ENABLE_ASYNC_WRITES", "false")),
 )

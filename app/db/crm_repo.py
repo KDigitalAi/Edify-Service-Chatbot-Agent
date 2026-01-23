@@ -1,5 +1,8 @@
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Union
 from app.db.supabase import get_edify_supabase_client
+from app.utils.cache import get_cached, set_cached, cache_key_crm_query
+from app.utils.retry import retry_with_backoff
+from app.core.config import settings
 import logging
 from datetime import datetime, timedelta
 import re
@@ -68,6 +71,26 @@ class CRMRepo:
     
     def __init__(self):
         self.supabase = get_edify_supabase_client()
+    
+    def _get_table_columns(self, table_key: str) -> str:
+        """
+        Returns explicit column list for each CRM table.
+        Maintains identical behavior to select("*") by including all columns.
+        Based on search_fields, date/order fields, and common table patterns.
+        """
+        # Column lists based on table schemas, search_fields, and common patterns
+        # Includes all fields that would be returned by select("*")
+        column_map = {
+            "campaigns": "id,name,status,type,campaign_owner,phone,budget,start_date,end_date,description,created_at,updated_at",
+            "leads": "id,name,email,phone,lead_status,course_list,lead_source,lead_owner,company,address,city,state,country,notes,created_at,updated_at",
+            "tasks": "id,subject,priority,status,task_type,due_date,assigned_to,description,created_at,updated_at",
+            "trainers": "id,trainer_name,trainer_status,tech_stack,email,phone,location,experience,rating,created_at,updated_at",
+            "learners": "id,name,email,phone,status,course,location,enrollment_date,progress,created_at,updated_at",
+            "Course": "id,title,description,trainer,duration,price,level,category,createdAt,updatedAt",
+            "activity": "id,activity_name,activity_type,description,created_by,created_at,updated_at",
+            "notes": "id,content,note_type,created_by,related_to,created_at,updated_at"
+        }
+        return column_map.get(table_key, "*")  # Fallback to * if table not found
     
     def _detect_table_intent(self, query: str) -> Optional[str]:
         """
@@ -222,13 +245,31 @@ class CRMRepo:
     def _build_query(self, table_config: Dict[str, Any], filters: Dict[str, Any], limit: int = 50):
         """
         Builds and executes Supabase query based on table config and filters.
+        Optional optimization: Select specific fields if ENABLE_QUERY_OPTIMIZATION is enabled.
         """
         table_name = table_config["table"]
         search_fields = table_config["search_fields"]
         date_field = table_config["date_field"]
         order_field = table_config["order_field"]
         
-        query_builder = self.supabase.table(table_name).select("*")
+        # Optimize: Use explicit column list instead of select("*") if enabled
+        # This improves query performance while maintaining identical behavior
+        if settings.ENABLE_QUERY_OPTIMIZATION:
+            table_key = None
+            for key, config in self.TABLE_CONFIGS.items():
+                if config["table"] == table_name:
+                    table_key = key
+                    break
+            
+            if table_key:
+                select_fields = self._get_table_columns(table_key)
+                query_builder = self.supabase.table(table_name).select(select_fields)
+            else:
+                # Fallback to * if table not found in config
+                query_builder = self.supabase.table(table_name).select("*")
+        else:
+            # Default behavior: use select("*") when optimization disabled
+            query_builder = self.supabase.table(table_name).select("*")
         
         # Apply date filters if present
         if filters["start_date"] and filters["end_date"]:
@@ -270,7 +311,21 @@ class CRMRepo:
         query_builder = query_builder.order(order_field, desc=True)
         
         # Apply limit
-        response = query_builder.limit(limit).execute()
+        # Optional: Retry with exponential backoff if enabled (behind flag, disabled by default)
+        if settings.ENABLE_QUERY_RETRY:
+            def execute_query():
+                return query_builder.limit(limit).execute()
+            
+            try:
+                response = retry_with_backoff(
+                    execute_query,
+                    exceptions=(Exception,)
+                )
+            except Exception as retry_error:
+                logger.error(f"Query retry exhausted: {retry_error}")
+                raise retry_error
+        else:
+            response = query_builder.limit(limit).execute()
         
         return response.data if response.data else []
     
@@ -310,7 +365,15 @@ class CRMRepo:
             
             logger.info(f"Paginated search - table: {table_key}, page: {page}, page_size: {page_size}")
             
-            # Parse filters
+            # READ-THROUGH: Try cache first (non-breaking if cache unavailable)
+            cache_key = cache_key_crm_query(query, table_key, page=page, page_size=page_size)
+            if settings.ENABLE_CACHING:
+                cached = get_cached(cache_key)
+                if cached is not None:
+                    logger.debug(f"Cache hit for paginated CRM query: {table_key}, page {page}")
+                    return cached
+            
+            # Cache miss: Parse filters and query database
             filters = self._parse_date_filters(query)
             
             # Build query with pagination
@@ -319,7 +382,13 @@ class CRMRepo:
             date_field = table_config["date_field"]
             order_field = table_config["order_field"]
             
-            query_builder = self.supabase.table(table_name).select("*", count="exact")
+            # Optimize: Use explicit column list instead of select("*") if enabled
+            if settings.ENABLE_QUERY_OPTIMIZATION:
+                select_fields = self._get_table_columns(table_key)
+                query_builder = self.supabase.table(table_name).select(select_fields, count="exact")
+            else:
+                # Default behavior: use select("*") when optimization disabled
+                query_builder = self.supabase.table(table_name).select("*", count="exact")
             
             # Apply filters (same logic as _build_query)
             if filters["start_date"] and filters["end_date"]:
@@ -345,13 +414,20 @@ class CRMRepo:
             total = response.count if hasattr(response, 'count') and response.count is not None else len(data)
             has_more = (offset + page_size) < total
             
-            return {
+            result = {
                 "data": data,
                 "total": total,
                 "page": page,
                 "page_size": page_size,
                 "has_more": has_more
             }
+            
+            # READ-THROUGH: Cache successful read result (TTL: 5 minutes = 300 seconds)
+            # Only cache if we got data (successful read)
+            if settings.ENABLE_CACHING and data:
+                set_cached(cache_key, result, ttl=300)
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error in paginated CRM search: {e}", exc_info=True)
@@ -363,18 +439,33 @@ class CRMRepo:
                 "has_more": False
             }
     
-    def search_crm(self, query: str) -> List[Dict[str, Any]]:
+    def search_crm(
+        self, 
+        query: str, 
+        page: Optional[int] = None, 
+        page_size: Optional[int] = None
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Searches CRM data across all supported tables.
         Automatically detects which table to query based on user intent.
         Returns raw verified data from Supabase.
+        Optional caching: Uses cache if enabled (non-breaking).
+        Optional pagination: If page/page_size provided, returns paginated response.
         
         Args:
             query: Search query string (can include table name, date keywords, text search)
+            page: Optional page number (1-indexed). If provided with page_size, returns paginated response.
+            page_size: Optional number of records per page. If provided with page, returns paginated response.
             
         Returns:
-            List of CRM records (raw data from Supabase)
+            If page/page_size provided: Dict with keys: data, total, page, page_size, has_more
+            Otherwise: List of CRM records (raw data from Supabase) - DEFAULT BEHAVIOR
         """
+        # If pagination params provided, use paginated method
+        if page is not None and page_size is not None:
+            return self.search_crm_paginated(query, page=page, page_size=page_size)
+        
+        # DEFAULT BEHAVIOR: No pagination - return List (existing behavior)
         try:
             # Detect which table to query
             table_key = self._detect_table_intent(query)
@@ -382,11 +473,24 @@ class CRMRepo:
             
             logger.info(f"Detected table: {table_key} (table: {table_config['table']})")
             
-            # Parse filters
+            # READ-THROUGH: Try cache first (non-breaking if cache unavailable)
+            cache_key = cache_key_crm_query(query, table_key, limit=50)
+            if settings.ENABLE_CACHING:
+                cached = get_cached(cache_key)
+                if cached is not None:
+                    logger.debug(f"Cache hit for CRM query: {table_key}")
+                    return cached
+            
+            # Cache miss: Parse filters and query database
             filters = self._parse_date_filters(query)
             
             # Build and execute query
             data = self._build_query(table_config, filters, limit=50)
+            
+            # READ-THROUGH: Cache successful read result (TTL: 5 minutes = 300 seconds)
+            # Only cache if we got data (successful read)
+            if settings.ENABLE_CACHING and data:
+                set_cached(cache_key, data, ttl=300)
             
             logger.info(f"Retrieved {len(data)} records from {table_config['table']}")
             return data

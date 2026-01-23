@@ -41,6 +41,7 @@ if settings.ENABLE_COMPRESSION:
 # Optional: Add rate limiting (if enabled)
 # Note: Rate limiting is applied via decorators on individual routes
 # Routes will work without rate limiting if slowapi is not installed
+# Only /chat endpoints are rate limited - health and static routes are excluded
 if settings.ENABLE_RATE_LIMITING:
     try:
         from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -51,7 +52,7 @@ if settings.ENABLE_RATE_LIMITING:
         app.state.limiter = limiter
         app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
         logger.info(f"Rate limiting enabled: {settings.RATE_LIMIT_PER_MINUTE}/min, {settings.RATE_LIMIT_PER_HOUR}/hour")
-        logger.info("Rate limiting will be applied to routes that use @limiter.limit() decorator")
+        logger.info("Rate limiting will be applied to /chat endpoints only (health and static routes excluded)")
     except ImportError:
         logger.warning("slowapi not installed - rate limiting disabled. Install with: pip install slowapi")
         settings.ENABLE_RATE_LIMITING = False

@@ -21,7 +21,8 @@ class MemoryRepo:
         """
         Retrieves recent chat history for a session.
         Converts chat_history pairs to LangGraph format (role + content).
-        Optional caching: Uses cache if enabled (non-breaking).
+        READ-THROUGH caching: Cache miss → DB query → cache write.
+        TTL: 2 minutes for chat history.
         
         Args:
             session_id: Session UUID
@@ -30,14 +31,18 @@ class MemoryRepo:
         Returns:
             List of messages in format [{"role": "admin", "content": "..."}, ...]
         """
-        # Optional: Try cache first (non-breaking if cache unavailable)
-        cache_key = cache_key_chat_history(session_id)
-        cached = get_cached(cache_key)
-        if cached is not None:
-            logger.debug(f"Cache hit for chat history: {session_id[:8]}...")
-            return cached
+        from app.core.config import settings
+        
+        # READ-THROUGH: Try cache first (non-breaking if cache unavailable)
+        cache_key = cache_key_chat_history(session_id, limit)
+        if settings.ENABLE_CACHING:
+            cached = get_cached(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit for chat history: {session_id[:8]}...")
+                return cached
         
         try:
+            # Cache miss: Query database
             response = (
                 self.supabase.table(self.table)
                 .select("user_message, assistant_response, created_at")
@@ -48,6 +53,7 @@ class MemoryRepo:
             )
             
             if not response.data:
+                # Empty result - don't cache empty results
                 return []
             
             # Convert pairs to individual messages in chronological order
@@ -65,14 +71,17 @@ class MemoryRepo:
                     "content": pair["assistant_response"]
                 })
             
-            # Optional: Cache the result (non-breaking if cache fails)
-            set_cached(cache_key, messages)
+            # READ-THROUGH: Cache successful read result (TTL: 2 minutes = 120 seconds)
+            # Only cache if we got messages (successful read)
+            if settings.ENABLE_CACHING and messages:
+                set_cached(cache_key, messages, ttl=120)
             
             logger.debug(f"Loaded {len(messages)} messages from chat_history for session {session_id[:8]}...")
             return messages
             
         except Exception as e:
             logger.error(f"Error fetching chat history: {e}", exc_info=True)
+            # Don't cache errors - return empty list
             return []
 
     def save_message(

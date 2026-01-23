@@ -2,7 +2,9 @@ from typing import Dict, Any
 from app.langgraph.state import AgentState
 from app.db.retrieved_context_repo import RetrievedContextRepo
 from app.db.audit_repo import AuditRepo
+from app.core.config import settings
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -34,19 +36,45 @@ def check_context_node(state: AgentState) -> Dict[str, Any]:
         logger.warning(f"No data found for {source} query: {query[:100]}")
         
         # Persist this event for analysis
+        # Optional: Move context saving off main request path using background tasks
         try:
             context_repo = RetrievedContextRepo()
-            context_repo.save_context(
-                session_id=session_id or "unknown",
-                admin_id=admin_id,
-                source_type=source or "none",
-                query_text=query,
-                payload={"status": "no_data_found"},  # Only store status, query is in query_text column
-                record_count=0,
-                error_message="No data found"
-            )
             
-            # Audit log no data found
+            if settings.ENABLE_ASYNC_WRITES:
+                # Save context in background thread (non-blocking, fire-and-forget)
+                # Since this is a sync function, use threading instead of asyncio
+                def save_no_data_context_thread():
+                    """Save no-data-found context in background thread without blocking main request."""
+                    try:
+                        context_repo.save_context(
+                            session_id=session_id or "unknown",
+                            admin_id=admin_id,
+                            source_type=source or "none",
+                            query_text=query,
+                            payload={"status": "no_data_found"},
+                            record_count=0,
+                            error_message="No data found"
+                        )
+                    except Exception as save_error:
+                        logger.error(f"Background no-data context save failed: {save_error}", exc_info=True)
+                
+                # Create background thread (fire-and-forget, daemon thread)
+                thread = threading.Thread(target=save_no_data_context_thread, daemon=True)
+                thread.start()
+                logger.debug("No-data context save scheduled in background thread")
+            else:
+                # Existing sync behavior (blocking)
+                context_repo.save_context(
+                    session_id=session_id or "unknown",
+                    admin_id=admin_id,
+                    source_type=source or "none",
+                    query_text=query,
+                    payload={"status": "no_data_found"},  # Only store status, query is in query_text column
+                    record_count=0,
+                    error_message="No data found"
+                )
+            
+            # Audit log no data found (always sync - audit logs are critical)
             audit = AuditRepo()
             audit.log_action(
                 admin_id=admin_id,
