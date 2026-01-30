@@ -1,31 +1,40 @@
-import sys
-import os
-
-# Add project root to Python path FIRST
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# MINIMAL FUNCTION HANDLER: Simple function with lazy imports
-# This prevents Vercel's inspection code from walking FastAPI's MRO during import
-# Vercel inspects module namespace at import time - keeping it minimal avoids MRO issues
-# All complex imports (FastAPI, Mangum) happen INSIDE the function at runtime
-
-# Global cache for Mangum handler (created on first call)
-_mangum_handler = None
+# ABSOLUTE MINIMAL HANDLER: Only function definition
+# Vercel's inspection happens at import - this file has minimal surface area
 
 def handler(event, context):
     """
     Vercel serverless function handler.
-    Creates FastAPI app and Mangum wrapper on-demand to avoid MRO inspection issues.
-    All complex imports happen here, not at module level.
+    All imports happen inside function to avoid Vercel's MRO inspection.
     """
-    global _mangum_handler
+    # Cache handler on function object (no module-level state)
+    if not hasattr(handler, '_cached'):
+        import sys
+        import os
+        
+        # Setup Python path
+        _current_file = os.path.abspath(__file__)
+        _root = os.path.dirname(os.path.dirname(_current_file))
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        
+        # Lazy import with error handling
+        try:
+            from mangum import Mangum
+            from app.main import app
+            handler._cached = Mangum(app, lifespan="off")
+        except Exception as e:
+            # Return error response if initialization fails
+            return {
+                'statusCode': 500,
+                'body': f'Handler initialization failed: {str(e)}'
+            }
     
-    # Lazy initialization - only create handler on first call
-    if _mangum_handler is None:
-        from mangum import Mangum
-        from app.main import app
-        _mangum_handler = Mangum(app, lifespan="off")
-    
-    # Call the Mangum handler
-    return _mangum_handler(event, context)
+    # Execute handler
+    try:
+        return handler._cached(event, context)
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': f'Handler execution failed: {str(e)}'
+        }
 
