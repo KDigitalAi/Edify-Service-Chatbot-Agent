@@ -134,8 +134,6 @@ Return Response to User
 
 ```
 service_chatbot/
-├── api/
-│   └── index.py                 # Vercel serverless handler
 ├── app/
 │   ├── __init__.py
 │   ├── main.py                  # FastAPI application entry point
@@ -196,7 +194,8 @@ service_chatbot/
 ├── scripts/
 │   └── pdf_to_embedding.py    # PDF ingestion script
 ├── requirements.txt            # Python dependencies
-├── vercel.json                 # Vercel deployment config
+├── Dockerfile                  # Docker container configuration
+├── .dockerignore              # Docker ignore patterns
 └── README.md                   # This file
 ```
 
@@ -208,7 +207,7 @@ service_chatbot/
 - Supabase account (2 instances: Edify and Chatbot)
 - OpenAI API key
 - (Optional) Redis for caching
-- (Optional) Vercel account for deployment
+- (Optional) Docker for containerized deployment
 
 ### Step 1: Clone Repository
 
@@ -298,18 +297,24 @@ MAX_PAGE_SIZE=200
 ### Step 6: Run Application
 
 ```bash
-# Development server
+# Development server (default port 8000)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# Production server
+# Production server (default port 8000)
 uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Or use a different port (e.g., 8080)
+uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
 The application will be available at:
-- API: `http://localhost:8000`
-- Interactive Chat: `http://localhost:8000/docs`
-- Frontend: `http://localhost:8000/`
+- API: `http://localhost:8000` (or your chosen port)
+- Interactive Chat: `http://localhost:8000/docs` (or your chosen port)
+- Frontend: `http://localhost:8000/` (or your chosen port)
 - API Docs: `http://localhost:8000/docs` (Swagger UI)
+- OpenAPI Schema: `http://localhost:8000/openapi.json`
+
+> **Note:** If ports 3000 or 8000 are already in use, use port 8080 or any other available port.
 
 ## ⚙️ Configuration
 
@@ -652,45 +657,149 @@ Health check endpoint.
 
 ## 🚢 Deployment
 
-### Vercel Deployment
-
-1. **Install Vercel CLI:**
-```bash
-npm i -g vercel
-```
-
-2. **Deploy:**
-```bash
-vercel
-```
-
-3. **Set Environment Variables:**
-Set all required environment variables in Vercel dashboard.
-
-4. **Configure `vercel.json`:**
-The project includes a `vercel.json` configuration file for serverless deployment.
-
 ### Docker Deployment
 
-Create a `Dockerfile`:
+The application is containerized and ready for deployment using Docker.
 
-```dockerfile
-FROM python:3.11-slim
+#### Build the Docker Image
 
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-Build and run:
 ```bash
 docker build -t edify-chatbot .
-docker run -p 8000:8000 --env-file .env edify-chatbot
+```
+
+#### Run the Container
+
+**Using environment file (default port 8080):**
+```bash
+docker run -d \
+  --name edify-chatbot \
+  -p 8080:8080 \
+  --env-file .env \
+  edify-chatbot
+```
+
+**Using a custom port:**
+```bash
+docker run -d \
+  --name edify-chatbot \
+  -p 8081:8081 \
+  -e PORT=8081 \
+  --env-file .env \
+  edify-chatbot
+```
+
+**Using environment variables directly:**
+```bash
+docker run -d \
+  --name edify-chatbot \
+  -p 8080:8080 \
+  -e PORT=8080 \
+  -e OPENAI_API_KEY=your_key \
+  -e EDIFY_SUPABASE_URL=your_url \
+  -e EDIFY_SUPABASE_SERVICE_ROLE_KEY=your_key \
+  -e CHATBOT_SUPABASE_URL=your_url \
+  -e CHATBOT_SUPABASE_SERVICE_ROLE_KEY=your_key \
+  edify-chatbot
+```
+
+> **Note:** The default port is **8080** to avoid conflicts with common ports 3000 and 8000. You can change it by setting the `PORT` environment variable.
+
+#### Docker Compose (Recommended)
+
+A `docker-compose.yml` file is already included. To use a custom port, set the `PORT` environment variable:
+
+```bash
+# Use default port 8080
+docker-compose up -d
+
+# Or use a custom port
+PORT=8081 docker-compose up -d
+```
+
+You can also edit the `docker-compose.yml` file to change the port mapping directly.
+
+#### Production Deployment
+
+For production, consider:
+
+1. **Use a reverse proxy** (nginx, Traefik) in front of the container
+2. **Set up proper logging** with volume mounts
+3. **Use Docker secrets** or a secrets management service
+4. **Configure resource limits** in docker-compose or Kubernetes
+5. **Set up health checks** and monitoring
+
+Example with resource limits:
+```yaml
+services:
+  chatbot:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - PORT=8080
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+```
+
+#### Kubernetes Deployment
+
+For Kubernetes, create deployment and service manifests:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edify-chatbot
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: edify-chatbot
+  template:
+    metadata:
+      labels:
+        app: edify-chatbot
+    spec:
+      containers:
+      - name: chatbot
+        image: edify-chatbot:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: PORT
+          value: "8080"
+        envFrom:
+        - secretRef:
+            name: edify-chatbot-secrets
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edify-chatbot-service
+spec:
+  selector:
+    app: edify-chatbot
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+  type: LoadBalancer
 ```
 
 ### Environment-Specific Configuration

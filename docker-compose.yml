@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  chatbot:
+    build: .
+    container_name: edify-chatbot
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    env_file:
+      - .env
+    environment:
+      - PORT=${PORT:-8080}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, os; port=os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Uncomment and adjust resource limits for production
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 1G
+

@@ -20,9 +20,6 @@ pytest==8.1.1
 # PDF processing for RAG
 pypdf==4.0.1
 
-# Serverless adapter for FastAPI (Vercel/Lambda compatibility)
-mangum>=0.17.0
-
 # Optional optimization dependencies (install only if using features)
 slowapi>=0.1.9  # For rate limiting
 # redis>=5.0.0    # For caching (install: pip install redis)
