@@ -14,21 +14,31 @@ app = FastAPI(
 )
 
 # Configure CORS (environment-aware: restrictive in production, permissive in development)
+# Edify Web App URL - Always allowed for integration
+EDIFY_WEB_APP_URL = "https://edify-enterprise-web-app-git-dev-tech-kdigitalais-projects.vercel.app"
+
 if settings.CORS_ALLOW_ORIGINS != "*":
-    # Explicit origins configured
+    # Explicit origins configured - add Edify web app URL
     cors_origins = [origin.strip() for origin in settings.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
+    # Ensure Edify web app URL is included
+    if EDIFY_WEB_APP_URL not in cors_origins:
+        cors_origins.append(EDIFY_WEB_APP_URL)
     logger.info(f"CORS configured for origins: {cors_origins}")
+    logger.info(f"Edify web app URL included: {EDIFY_WEB_APP_URL}")
 elif settings.ENV in ("local", "development", "dev"):
     # Development: allow all origins (convenient for local testing)
+    # "*" already allows all origins including Edify web app
     cors_origins = ["*"]
     logger.info("CORS allows all origins (development mode)")
+    logger.info(f"Edify web app URL will be allowed: {EDIFY_WEB_APP_URL}")
 else:
-    # Production/staging: warn if allowing all origins
+    # Production/staging: allow all origins (includes Edify web app)
     cors_origins = ["*"]
     logger.warning(
         f"CORS allows all origins in {settings.ENV} environment - "
         "consider restricting by setting CORS_ALLOW_ORIGINS environment variable"
     )
+    logger.info(f"Edify web app URL will be allowed: {EDIFY_WEB_APP_URL}")
 
 app.add_middleware(
     CORSMiddleware,
