@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Header, Request
+from fastapi import APIRouter, HTTPException, Depends, status, Header, Request, Query
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from app.core.security import get_admin_token
 from app.core.config import settings
 from app.services.chat_service import ChatService
 from app.db.supabase import get_chatbot_supabase_client
+from app.db.chat_history_repo import ChatHistoryRepo
 import logging
 import uuid
 
@@ -15,12 +16,12 @@ logger = logging.getLogger(__name__)
 # Optional rate limiting decorator
 # Applied only if ENABLE_RATE_LIMITING=true and slowapi is installed
 # Uses the limiter instance from app.state (set in main.py)
-# Only applies to /chat endpoints - health and static routes are excluded
+# Only applies to /chat endpoints - health routes are excluded
 def apply_rate_limit(func):
     """
     Apply rate limiting decorator if enabled.
     Only applies to /chat endpoints.
-    Health and static routes are excluded.
+    Health routes are excluded.
     Internal calls (without Request) are not rate limited.
     """
     if settings.ENABLE_RATE_LIMITING:
@@ -60,6 +61,22 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     session_id: str
+
+class ChatHistoryItem(BaseModel):
+    id: Optional[int] = None
+    session_id: str
+    admin_id: str
+    user_message: str
+    assistant_response: str
+    source_type: Optional[str] = None
+    response_time_ms: Optional[int] = None
+    tokens_used: Optional[int] = None
+    created_at: str
+
+class ChatHistoryResponse(BaseModel):
+    session_id: str
+    count: int
+    history: List[ChatHistoryItem]
 
 def get_or_create_session(session_id: str) -> Dict[str, Any]:
     """
@@ -133,3 +150,82 @@ async def chat_message(
         except:
             pass
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/history/{session_id}", response_model=ChatHistoryResponse)
+@apply_rate_limit
+async def get_chat_history(
+    request: Request,
+    session_id: str,
+    limit: int = Query(default=50, ge=1, le=200, description="Maximum number of records to return")
+):
+    """
+    Retrieve chat history for a session.
+    
+    Returns the conversation history including user messages and assistant responses
+    with metadata such as source type, response time, and tokens used.
+    
+    Optional rate limiting is applied if ENABLE_RATE_LIMITING=true.
+    
+    Args:
+        session_id: Session UUID
+        limit: Maximum number of records to return (1-200, default: 50)
+    
+    Returns:
+        ChatHistoryResponse with session_id, count, and list of history items
+    """
+    try:
+        # Validate session_id format (basic UUID check)
+        try:
+            uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid session_id format. Expected UUID."
+            )
+        
+        # Get chat history using repository
+        history_repo = ChatHistoryRepo()
+        history_data = history_repo.get_chat_history(session_id=session_id, limit=limit)
+        
+        # Convert to response model
+        history_items = []
+        for item in history_data:
+            history_items.append(ChatHistoryItem(
+                id=item.get("id"),
+                session_id=item.get("session_id", session_id),
+                admin_id=item.get("admin_id", ""),
+                user_message=item.get("user_message", ""),
+                assistant_response=item.get("assistant_response", ""),
+                source_type=item.get("source_type"),
+                response_time_ms=item.get("response_time_ms"),
+                tokens_used=item.get("tokens_used"),
+                created_at=item.get("created_at", "")
+            ))
+        
+        return ChatHistoryResponse(
+            session_id=session_id,
+            count=len(history_items),
+            history=history_items
+        )
+    
+    except HTTPException:
+        # Re-raise HTTP exceptions (like validation errors)
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving chat history for session {session_id}: {e}", exc_info=True)
+        # Audit log endpoint error
+        try:
+            from app.db.audit_repo import AuditRepo
+            audit = AuditRepo()
+            audit.log_action(
+                admin_id="unknown",
+                action="chat_history_endpoint_error",
+                details={"error": str(e), "session_id": session_id},
+                session_id=session_id
+            )
+        except:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve chat history"
+        )
