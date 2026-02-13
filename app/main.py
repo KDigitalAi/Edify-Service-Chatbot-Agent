@@ -18,7 +18,7 @@ app = FastAPI(
 
 # Configure CORS (environment-aware: restrictive in production, permissive in development)
 # Edify Web App URL - Always allowed for integration
-EDIFY_WEB_APP_URL = "https://edify-enterprise-web-app-git-dev-tech-kdigitalais-projects.vercel.app"
+EDIFY_WEB_APP_URL = "https://edify-enterprise-web-app-git-dev-tech-kdigitalais-projects.vercel.app", "https://enterprise.digitaledify.ai/","http://localhost:3000/"
 
 if settings.CORS_ALLOW_ORIGINS != "*":
     # Explicit origins configured - add Edify web app URL

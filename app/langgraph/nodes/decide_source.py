@@ -73,13 +73,176 @@ def normalize_input(text: str) -> str:
     
     return ' '.join(normalized_words)
 
+def detect_followup_intent(query: str) -> bool:
+    """
+    Detects if query is about follow-up reminders.
+    Returns True if follow-up intent detected.
+    
+    IMPORTANT: Excludes queries containing "send" - those are actions, not queries.
+    """
+    normalized = normalize_input(query)
+    
+    # EXCLUDE queries that contain "send" - those are email sending actions, not follow-up queries
+    if re.search(r'\bsend\b', normalized):
+        return False  # Don't treat as follow-up query if user wants to send email
+    
+    # Follow-up keywords
+    followup_keywords = [
+        'follow up', 'follow-up', 'followup',
+        'pending lead', 'pending leads',
+        'lead to call', 'leads to call',
+        'followup today', 'follow up today',
+        'requiring follow', 'need follow',
+        'due follow', 'overdue follow',
+        'reminder', 'reminders'
+    ]
+    
+    # Check for follow-up keywords
+    for keyword in followup_keywords:
+        if re.search(rf'\b{re.escape(keyword)}\b', normalized):
+            logger.info(f"Follow-up intent detected via keyword: {keyword}")
+            return True
+    
+    return False
+
+def detect_send_email_intent(query: str) -> bool:
+    """
+    Detects if query is about sending an email.
+    Returns True if send email intent detected.
+    """
+    normalized = normalize_input(query)
+    
+    # Send email keywords (must be explicit)
+    send_keywords = [
+        'send email', 'send mail', 'send this email', 'send this mail',
+        'email now', 'mail now', 'send it', 'dispatch email', 'dispatch mail',
+        'send the email', 'send the mail'
+    ]
+    
+    # Check for send keywords
+    has_send_keyword = any(
+        re.search(rf'\b{re.escape(keyword)}\b', normalized)
+        for keyword in send_keywords
+    )
+    
+    # Also check for "send" + "email" pattern even if separated by words (e.g., "send follow-up email")
+    # Pattern: "send" followed by optional words, then "email" or "mail"
+    has_send_email_pattern = (
+        re.search(r'\bsend\b', normalized) and 
+        (re.search(r'\bemail\b', normalized) or re.search(r'\bmail\b', normalized))
+    )
+    
+    if has_send_keyword or has_send_email_pattern:
+        logger.info(f"Send email intent detected: '{query[:50]}...'")
+        return True
+    
+    return False
+
+def detect_email_draft_intent(query: str) -> bool:
+    """
+    Detects if query is about email draft generation.
+    Returns True if email draft intent detected.
+    """
+    normalized = normalize_input(query)
+    
+    # Email draft keywords (comprehensive list)
+    email_keywords = [
+        'draft email', 'draft mail', 'write email', 'write mail',
+        'compose email', 'compose mail', 'create email', 'create mail',
+        'email draft', 'mail draft', 'follow-up email', 'followup email',
+        'follow-up mail', 'followup mail'
+    ]
+    
+    # Check for email draft keywords (but NOT send keywords)
+    has_email_keyword = any(
+        re.search(rf'\b{re.escape(keyword)}\b', normalized)
+        for keyword in email_keywords
+    )
+    
+    # Must NOT have send keywords (to distinguish from send intent)
+    has_send_keyword = any(
+        re.search(rf'\b{re.escape(keyword)}\b', normalized)
+        for keyword in ['send', 'dispatch', 'now']
+    )
+    
+    if has_email_keyword and not has_send_keyword:
+        logger.info(f"Email draft intent detected: '{query[:50]}...'")
+        return True
+    
+    return False
+
+def detect_lead_summary_intent(query: str) -> bool:
+    """
+    Detects if query is about lead activity summary.
+    Returns True if lead summary intent detected.
+    Handles various query formats dynamically.
+    """
+    normalized = normalize_input(query)
+    
+    # Lead summary keywords (comprehensive list)
+    summary_keywords = [
+        'summary', 'full summary', 'activity summary',
+        'lead summary', 'full history', 'activity history',
+        'lead activity', 'lead history', 'complete summary',
+        'history of lead', 'show activity', 'activity of lead'
+    ]
+    
+    # Check for summary keywords AND lead-related terms
+    has_summary_keyword = any(
+        re.search(rf'\b{re.escape(keyword)}\b', normalized)
+        for keyword in summary_keywords
+    )
+    
+    # Also check for lead-related terms
+    has_lead_term = any(
+        re.search(rf'\b{re.escape(term)}\b', normalized)
+        for term in ['lead', 'leads', 'prospect', 'customer']
+    )
+    
+    # Must have both summary keyword AND lead term
+    if has_summary_keyword and has_lead_term:
+        logger.info(f"Lead summary intent detected: '{query[:50]}...'")
+        return True
+    
+    # Also detect patterns like "history of lead X" or "summary for lead Y"
+    # This handles "Give me full summary of lead guna"
+    if re.search(r'\b(history|summary|activity|full)\s+(of|for)\s+lead', normalized):
+        logger.info(f"Lead summary intent detected via pattern: '{query[:50]}...'")
+        return True
+    
+    # Detect "full summary of lead" pattern (handles "Give me full summary of lead guna")
+    if re.search(r'full\s+summary\s+of\s+lead', normalized):
+        logger.info(f"Lead summary intent detected via 'full summary of lead' pattern")
+        return True
+    
+    return False
+
 def detect_intent_keywords(query: str) -> Optional[str]:
     """
     CRM-only intent detection.
     All queries default to CRM since SalesBot only handles CRM operations.
     Returns "crm" for all valid queries, None only for greetings.
+    
+    Priority order:
+    Greeting → Send Email → Follow-up → Draft Email → Lead Summary → CRM
     """
     normalized = normalize_input(query)
+    
+    # Check for send email intent FIRST (actions take priority over queries)
+    if detect_send_email_intent(query):
+        return "send_email"
+    
+    # Check for follow-up intent (only if not sending email)
+    if detect_followup_intent(query):
+        return "followup"
+    
+    # Check for email draft intent (higher priority than lead summary)
+    if detect_email_draft_intent(query):
+        return "email_draft"
+    
+    # Check for lead summary intent (higher priority than general CRM)
+    if detect_lead_summary_intent(query):
+        return "lead_summary"
     
     # CRM keywords (comprehensive list)
     crm_keywords = [
@@ -132,7 +295,7 @@ def decide_source_node(state: AgentState) -> Dict[str, Any]:
         # STEP 1: Try robust keyword-based intent detection (LENIENT)
         keyword_intent = detect_intent_keywords(user_message)
         if keyword_intent:
-            logger.info(f"Intent detected via keywords: {keyword_intent}")
+            logger.info(f"[DECIDE_SOURCE] Intent detected via keywords: {keyword_intent} for query: '{user_message[:80]}...'")
             return {"source_type": keyword_intent}
         
         # STEP 2: Default to CRM (SalesBot is CRM-only)

@@ -40,8 +40,34 @@ def check_context_node(state: AgentState) -> Dict[str, Any]:
     # If none, we don't need context (greetings set source_type="none")
     if source == "none":
         return {}
+    
+    # If followup source and response already set, skip LLM (response formatted directly)
+    if source == "followup" and state.get("response"):
+        return {}
+    
+    # If lead_summary source and response already set (error case), skip LLM
+    if source == "lead_summary" and state.get("response"):
+        return {}
+    
+    # If email_draft source and response already set, skip LLM (response formatted directly)
+    if source == "email_draft" and state.get("response"):
+        return {}
+    
+    # If send_email source and response already set, skip LLM (response formatted directly)
+    if source == "send_email" and state.get("response"):
+        return {}
+    
+    # Check if context is empty (handles both list and dict)
+    is_empty = False
+    if not context:
+        is_empty = True
+    elif isinstance(context, list) and len(context) == 0:
+        is_empty = True
+    elif isinstance(context, dict) and not context.get("lead"):
+        # For lead_summary, check if lead exists in dict
+        is_empty = True
         
-    if not context or (isinstance(context, list) and len(context) == 0):
+    if is_empty:
         # No data found - this should be rare for valid CRM intents
         # Log this as it indicates a potential issue with data retrieval
         query = state.get("user_message", "")

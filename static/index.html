@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SalesBot - CRM Agentic AI</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🤖 SalesBot - CRM Agentic AI</h1>
+                <div class="header-actions">
+                    <button id="clearBtn" class="btn-secondary" title="Clear Chat">Clear</button>
+                    <button id="historyBtn" class="btn-secondary" title="View History">History</button>
+                    <span id="statusIndicator" class="status-indicator" title="Connection Status">
+                        <span class="status-dot"></span>
+                        <span id="statusText">Connecting...</span>
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Chat Container -->
+        <div class="chat-container" id="chatContainer">
+            <div class="welcome-message" id="welcomeMessage">
+                <div class="welcome-content">
+                    <h2>Welcome to SalesBot! 👋</h2>
+                    <p>I'm your AI-powered CRM assistant. I can help you with:</p>
+                    <ul>
+                        <li>📊 Query CRM data (leads, campaigns, tasks)</li>
+                        <li>📅 Find leads requiring follow-up</li>
+                        <li>🔍 Search and analyze sales data</li>
+                        <li>💬 Answer questions about your CRM</li>
+                    </ul>
+                    <p class="welcome-examples">
+                        <strong>Try asking:</strong><br>
+                        "Which leads need follow up today?"<br>
+                        "Show me all leads"<br>
+                        "What campaigns are active?"
+                    </p>
+                </div>
+            </div>
+            <div id="messages" class="messages"></div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="input-container">
+            <form id="chatForm" class="chat-form">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput" 
+                        class="message-input" 
+                        placeholder="Type your message here... (Press Enter to send, Shift+Enter for new line)"
+                        rows="1"
+                        autocomplete="off"
+                    ></textarea>
+                    <button type="submit" id="sendBtn" class="send-button" disabled>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- History Modal -->
+    <div id="historyModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Chat History</h2>
+                <button class="modal-close" id="closeHistoryBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="historyContent" class="history-content">
+                    <p class="loading-text">Loading history...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+

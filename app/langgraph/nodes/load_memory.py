@@ -105,7 +105,7 @@ def load_memory_node(state: AgentState) -> Dict[str, Any]:
     Output format: returns {"conversation_history": [...], "entity_memory": {...}}
     """
     try:
-        from app.langgraph.nodes.decide_source import is_greeting, get_greeting_response
+        from app.langgraph.nodes.decide_source import is_greeting, get_greeting_response, decide_source_node
         
         user_message = state.get("user_message", "")
         
@@ -118,10 +118,27 @@ def load_memory_node(state: AgentState) -> Dict[str, Any]:
                 "conversation_history": []
             }
         
+        # CRITICAL: Detect intent and set source_type BEFORE loading history
+        # This ensures proper routing to send_email, followup, email_draft, etc.
+        intent_result = decide_source_node(state)
+        source_type = intent_result.get("source_type", "crm")
+        
+        # If decide_source_node already set a response (e.g., greeting), return it
+        if intent_result.get("response"):
+            return {
+                **intent_result,
+                "conversation_history": []
+            }
+        
+        logger.info(f"[LOAD_MEMORY] Intent detected: {source_type} for query: '{user_message[:50]}...'")
+        
         # Check if history is needed
         if not _needs_history(user_message):
             logger.info(f"Skipping history load for query: {user_message[:50]}...")
-            return {"conversation_history": []}
+            return {
+                "conversation_history": [],
+                "source_type": source_type  # Ensure source_type is set even when skipping history
+            }
         
         # History is needed - load it
         session_id = state["session_id"]
@@ -175,6 +192,7 @@ def load_memory_node(state: AgentState) -> Dict[str, Any]:
         
         return {
             "conversation_history": history,
+            "source_type": source_type,  # CRITICAL: Set source_type for proper routing
             **entity_memory,  # Inject entity memory into state
             **pending_action_memory  # Inject pending action memory into state
         }

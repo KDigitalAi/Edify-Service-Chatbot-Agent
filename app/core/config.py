@@ -94,6 +94,14 @@ class Settings(BaseModel):
     
     # Async Writes (disabled by default)
     ENABLE_ASYNC_WRITES: bool = False  # Move context saving off main request path using background tasks
+    
+    # SMTP Email Configuration
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    EMAIL_FROM_NAME: str = "Edify Sales Team"
 
 settings = Settings(
     OPENAI_API_KEY=os.getenv("OPENAI_API_KEY", ""),
@@ -135,4 +143,11 @@ settings = Settings(
     ENABLE_ASYNC_DB=_parse_bool(os.getenv("ENABLE_ASYNC_DB", "false")),
     # Async writes (disabled by default)
     ENABLE_ASYNC_WRITES=_parse_bool(os.getenv("ENABLE_ASYNC_WRITES", "false")),
+    # SMTP Email Configuration
+    SMTP_HOST=os.getenv("SMTP_HOST", "smtp.gmail.com"),
+    SMTP_PORT=_parse_int(os.getenv("SMTP_PORT", "587"), 587),
+    SMTP_USERNAME=os.getenv("SMTP_USERNAME", ""),
+    SMTP_PASSWORD=os.getenv("SMTP_PASSWORD", ""),
+    SMTP_USE_TLS=_parse_bool(os.getenv("SMTP_USE_TLS", "true")),
+    EMAIL_FROM_NAME=os.getenv("EMAIL_FROM_NAME", "Edify Sales Team"),
 )
