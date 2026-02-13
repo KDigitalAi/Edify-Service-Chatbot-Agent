@@ -1,4 +1,4 @@
-name: Deploy to Vercel (Development)
+name: Deploy Edify Chatbot Agent
 
 on:
   push:
@@ -8,8 +8,85 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
 
     steps:
-      - name: Trigger Vercel Deployment
-        run: curl -X POST https://api.vercel.com/v1/integrations/deploy/prj_SXHgG6yWu8kzMdaq8ePHfWm2V7kR/1zeQrAyOen
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect compose directory
+        id: detect
+        run: |
+          if [ -f "./docker-compose.prod.yml" ]; then
+            APP_PATH="."
+            COMPOSE_FILE="docker-compose.prod.yml"
+          elif [ -f "./docker-compose.yml" ]; then
+            APP_PATH="."
+            COMPOSE_FILE="docker-compose.yml"
+          else
+            APP_PATH="."
+            COMPOSE_FILE="docker-compose.yml"
+          fi
+          echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
+          echo "compose_file=$COMPOSE_FILE" >> $GITHUB_OUTPUT
+
+      - name: Find .env file location
+        id: env_file
+        run: |
+          if [ -f "/opt/edify-chatbot/.env" ]; then
+            ENV_FILE="/opt/edify-chatbot/.env"
+          elif [ -f "${{ steps.detect.outputs.app_path }}/.env" ]; then
+            ENV_FILE="${{ steps.detect.outputs.app_path }}/.env"
+          elif [ -f "$HOME/edify-chatbot/.env" ]; then
+            ENV_FILE="$HOME/edify-chatbot/.env"
+          else
+            ENV_FILE="${{ steps.detect.outputs.app_path }}/.env"
+          fi
+          echo "env_file=$ENV_FILE" >> $GITHUB_OUTPUT
+          echo "Using .env file at: $ENV_FILE"
+
+      - name: Stop old chatbot containers
+        working-directory: ${{ steps.detect.outputs.app_path }}
+        run: |
+          docker compose \
+            -f ${{ steps.detect.outputs.compose_file }} \
+            --env-file ${{ steps.env_file.outputs.env_file }} \
+            down --remove-orphans || true
+
+      - name: Clean old Docker resources
+        run: |
+          echo "Cleaning up old Docker resources..."
+          docker container prune -f || true
+          docker image prune -a -f || true
+          docker volume prune -f || true
+          docker builder prune -a -f || true
+          echo "Cleanup completed"
+
+      - name: Build and start chatbot containers
+        working-directory: ${{ steps.detect.outputs.app_path }}
+        run: |
+          echo "Building and starting containers..."
+          docker compose \
+            -f ${{ steps.detect.outputs.compose_file }} \
+            --env-file ${{ steps.env_file.outputs.env_file }} \
+            up -d --build --force-recreate --remove-orphans
+          echo "Deployment completed successfully"
+
+      - name: Verify deployment
+        run: |
+          echo "Waiting for container to be healthy..."
+          sleep 10
+          if docker ps | grep -q edify-chatbot; then
+            echo "✅ Container is running"
+            docker ps | grep edify-chatbot
+          else
+            echo "❌ Container failed to start"
+            docker logs edify-chatbot || true
+            exit 1
+          fi
+          
+      - name: Show container logs
+        if: always()
+        run: |
+          echo "=== Container Logs ==="
+          docker logs edify-chatbot --tail 50 || true

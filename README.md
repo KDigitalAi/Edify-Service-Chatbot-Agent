@@ -928,3 +928,4 @@ For issues and questions:
 
 **Built with ❤️ for Edify Admin Platform**
 
+Trigger
