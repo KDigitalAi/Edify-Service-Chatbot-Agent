@@ -40,7 +40,7 @@ def check_context_node(state: AgentState) -> Dict[str, Any]:
     # If none, we don't need context (greetings set source_type="none")
     if source == "none":
         return {}
-    
+        
     # If followup source and response already set, skip LLM (response formatted directly)
     if source == "followup" and state.get("response"):
         return {}

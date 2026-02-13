@@ -1,19 +1,19 @@
-# Edify Admin AI Service Agent
+# Edify SalesBot - CRM Agentic AI Service
 
-A comprehensive AI-powered CRM chatbot service (SalesBot) for Edify Admin platform that provides intelligent access to CRM data sources through natural language conversations.
+A comprehensive AI-powered CRM chatbot service for the Edify Admin platform that provides intelligent access to CRM data sources through natural language conversations. Built with **LangGraph** for orchestration, **OpenAI GPT-4** for natural language understanding, and **Supabase** for data storage and retrieval.
 
 ## 📋 Table of Contents
 
 - [Overview](#overview)
-- [Features](#features)
+- [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Installation & Setup](#installation--setup)
 - [Configuration](#configuration)
-- [Workflows](#workflows)
-- [Database Schema](#database-schema)
+- [Core Functionalities](#core-functionalities)
 - [API Endpoints](#api-endpoints)
-- [Data Sources](#data-sources)
+- [LangGraph Workflow](#langgraph-workflow)
+- [Database Schema](#database-schema)
 - [Deployment](#deployment)
 - [Development](#development)
 - [Testing](#testing)
@@ -21,24 +21,114 @@ A comprehensive AI-powered CRM chatbot service (SalesBot) for Edify Admin platfo
 
 ## 🎯 Overview
 
-The Edify Admin AI Service Agent is an intelligent chatbot that enables users to query and retrieve information from multiple data sources:
+SalesBot is a CRM-focused agentic AI that provides comprehensive CRM operations through natural language interactions. The system enables users to:
 
-- **CRM (Customer Relationship Management)**: Leads, campaigns, trainers, learners, tasks, activities, notes, courses
-SalesBot is a CRM-only agentic AI that provides full CRUD operations on CRM data including leads, campaigns, tasks, trainers, learners, courses, activities, notes, batches, emails, calls, meetings, and messages.
+- **Query CRM Data**: Access leads, campaigns, tasks, trainers, learners, courses, activities, and notes
+- **Manage Follow-ups**: Identify leads requiring follow-up based on `next_follow_up` dates
+- **Generate Email Drafts**: Create professional email drafts using AI based on lead context
+- **Send Emails**: Send emails directly to leads via SMTP
+- **View Lead Summaries**: Get comprehensive activity summaries for any lead
+- **Perform CRUD Operations**: Create, read, update, and delete CRM records through natural language
 
-The system uses **LangGraph** for orchestration, **OpenAI GPT-4** for natural language understanding, and **Supabase** for data storage and retrieval.
+The system uses **LangGraph** for stateful workflow orchestration, **OpenAI GPT-4** for intelligent intent detection and response formatting, and **Supabase** for data persistence.
 
-## ✨ Features
+## ✨ Key Features
 
-### Core Capabilities
-- **CRM Data Access**: Seamlessly query and manage CRM data with full CRUD operations
-- **Intelligent Intent Detection**: Automatically routes queries to the correct data source
-- **Conversation Memory**: Maintains context across conversation turns
-- **Session Management**: Anonymous and authenticated session support
-- **Vector Search**: Semantic search for knowledge base documents
-- **Audit Logging**: Comprehensive logging of all actions and queries
+### 1. **Intelligent Intent Detection**
+- **Greeting Detection**: Recognizes greetings and responds appropriately
+- **Follow-up Queries**: Identifies requests for leads requiring follow-up
+- **Email Draft Requests**: Detects when users want to generate email drafts
+- **Email Sending**: Recognizes explicit email sending requests
+- **Lead Summary Requests**: Identifies requests for comprehensive lead activity summaries
+- **CRM Queries**: Routes all other queries to CRM data access
 
-### Advanced Features
+Priority order: **Greeting → Send Email → Follow-up → Email Draft → Lead Summary → CRM**
+
+### 2. **Follow-up Lead Management**
+- Automatically identifies leads requiring follow-up based on `next_follow_up` date
+- Filters out closed/lost leads
+- Returns formatted list of leads sorted by follow-up date
+- Supports queries like:
+  - "Which leads need follow up today?"
+  - "Show me leads requiring follow-up"
+  - "Who needs follow up?"
+
+### 3. **Smart Email Draft Assistant**
+- **Context-Aware Drafting**: Analyzes lead's latest interaction (calls, emails, meetings, notes)
+- **Template Selection**: Automatically selects appropriate template based on:
+  - Latest interaction type
+  - Lead status and opportunity stage
+  - Time since last interaction
+  - Objection handling needs
+- **Template Types**:
+  - **Follow-up Email**: After calls with no response
+  - **Proposal Email**: When opportunity status is "Visiting"
+  - **Re-engagement Email**: No interaction for extended period
+  - **Meeting Confirmation**: When meeting is scheduled
+  - **Objection Handling**: When price/objection keywords detected
+- **LLM-Powered**: Uses GPT-4 to generate personalized, professional email content
+- **Fallback Templates**: Static templates if LLM generation fails
+
+### 4. **Email Sending (SMTP)**
+- **SMTP Integration**: Sends emails via configured SMTP server
+- **Template-Based Sending**: Supports introduction, follow-up, and meeting reminder templates
+- **Email Validation**: Validates recipient email addresses
+- **Error Handling**: Comprehensive error handling for SMTP failures
+- **Email Tracking**: Records sent emails in `emails` table
+- **Configuration**: SMTP settings via environment variables
+
+### 5. **Lead Activity Summary**
+- **Comprehensive View**: Fetches all activities for a lead:
+  - Calls (inbound/outbound)
+  - Emails (sent/received)
+  - Meetings (scheduled/completed)
+  - Notes (all notes related to lead)
+- **Dynamic Lead Identification**: Works with lead ID or name (case-insensitive)
+- **Activity Timeline**: Chronological timeline of recent activities
+- **LLM Formatting**: Uses GPT-4 to format summary in natural language
+- **Fallback Formatting**: Structured text format if LLM unavailable
+
+### 6. **CRM Data Access (Full CRUD)**
+- **Supported Tables**:
+  - `campaigns`: Marketing campaigns
+  - `leads`: Customer leads and prospects
+  - `tasks`: Task management
+  - `trainers`: Trainer profiles
+  - `learners`: Learner profiles
+  - `Course`: Course catalog
+  - `activity`: Activity logs
+  - `notes`: Notes and comments
+  - `batches`: Training batches
+  - `emails`: Email records
+  - `calls`: Call records
+  - `meetings`: Meeting records
+  - `messages`: Message records
+- **Operations**: Create, Read, Update, Delete for all tables
+- **Smart Table Detection**: Automatically detects target table from query keywords
+- **Date Filtering**: Supports "today", "yesterday", "this week", "new" queries
+- **Text Search**: Multi-field text search across relevant columns
+- **Pagination**: Built-in pagination support
+
+### 7. **Conversation Memory**
+- Maintains context across conversation turns
+- Loads last 5 conversation pairs from database
+- Persists all conversations to `chat_history` table
+- Tracks source type for each interaction
+
+### 8. **Session Management**
+- Anonymous session support
+- Authenticated session support (with admin_id)
+- Automatic session creation
+- Session validation on each request
+- Last activity tracking
+
+### 9. **Tool Registry System**
+- Comprehensive tool registry for CRUD operations
+- Tool validation and error handling
+- Destructive action confirmation support
+- Automatic tool schema generation for LLM
+
+### 10. **Advanced Features**
 - **Date Filtering**: Support for "today", "yesterday", "this week", "new" queries
 - **Smart Table Detection**: Automatically detects which table to query based on keywords
 - **Response Formatting**: Clean, readable responses with numbered lists and structured data
@@ -46,6 +136,7 @@ The system uses **LangGraph** for orchestration, **OpenAI GPT-4** for natural la
 - **Rate Limiting**: Optional rate limiting for API protection
 - **Caching**: Optional Redis caching for improved performance
 - **Response Compression**: Optional GZip compression for faster responses
+- **Audit Logging**: Comprehensive logging of all actions and queries
 
 ## 🏗️ Architecture
 
@@ -53,30 +144,32 @@ The system uses **LangGraph** for orchestration, **OpenAI GPT-4** for natural la
 
 ```
 ┌─────────────────┐
-│   Frontend      │
-│  (HTML/JS)      │
+│   API Client    │
+│  (Frontend/API) │
 └────────┬────────┘
          │ HTTP/REST
          ▼
 ┌─────────────────┐
 │   FastAPI       │
 │   Application   │
+│  (app/main.py)  │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
 │   LangGraph     │
 │   Workflow      │
+│  (graph.py)     │
 └────────┬────────┘
          │
-    ┌────┴────┬──────────┬──────────┐
-    ▼         ▼          ▼          ▼
-┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-│  CRM   │
-│  Repo  │ │  Repo  │ │  Repo  │ │ Vector │
-└───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
-    │         │          │          │
-    └─────────┴──────────┴──────────┘
+    ┌────┴────┬──────────┬──────────┬──────────┐
+    ▼         ▼          ▼          ▼          ▼
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│  CRM   │ │ Follow-│ │ Email  │ │ Lead   │ │ Memory │
+│  Repo  │ │  up    │ │ Draft  │ │Summary │ │  Repo  │
+└───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
+    │         │          │          │          │
+    └─────────┴──────────┴──────────┴──────────┘
               │
          ┌────▼────┐
          │Supabase│
@@ -86,103 +179,110 @@ The system uses **LangGraph** for orchestration, **OpenAI GPT-4** for natural la
 
 ### LangGraph Workflow
 
-The chatbot uses a state machine workflow with the following nodes:
-
-1. **validate_session**: Validates and initializes session
-2. **load_memory**: Loads conversation history
-3. **fetch_crm**: Retrieves CRM data
-5. **check_context**: Validates retrieved data
-6. **call_llm**: Formats response using OpenAI
-7. **save_memory**: Persists conversation to database
-
-### Data Flow
+The chatbot uses a state machine workflow with conditional routing:
 
 ```
-User Message
-    │
-    ▼
-Session Validation
-    │
-    ▼
-Load Conversation History
-    │
-    ▼
-CRM Data Fetching
-    │
-    └─→ CRM ──→ Fetch CRM Data
-    │
-    ▼
-Validate Retrieved Context
-    │
-    ▼
-Format Response (LLM)
-    │
-    ▼
-Save to Database
-    │
-    ▼
-Return Response to User
+START
+  │
+  ▼
+[validate_session]
+  │
+  ├─→ Error → [save_memory] → END
+  └─→ Success
+      │
+      ▼
+[load_memory]
+  │
+  ├─→ Greeting → [check_context] → [save_memory] → END
+  ├─→ Follow-up → [fetch_followup_leads] → [save_memory] → END
+  ├─→ Send Email → [send_email] → [save_memory] → END
+  ├─→ Email Draft → [generate_email_draft] → [save_memory] → END
+  ├─→ Lead Summary → [fetch_lead_activity_summary] → [save_memory] → END
+  └─→ CRM → [fetch_crm] → [check_context] → [call_llm] → [execute_action] → [save_memory] → END
 ```
+
+### Node Descriptions
+
+1. **validate_session**: Validates session ID, creates new session if needed
+2. **load_memory**: Loads last 5 conversation turns from database, detects intent
+3. **decide_source**: Uses keyword matching to determine data source (handled in load_memory)
+4. **fetch_followup_leads**: Retrieves leads requiring follow-up
+5. **fetch_lead_activity_summary**: Fetches comprehensive lead activity summary
+6. **generate_email_draft**: Generates AI-powered email drafts
+7. **send_email**: Sends emails via SMTP
+8. **fetch_crm**: Retrieves CRM data based on query
+9. **check_context**: Validates retrieved data, handles empty results
+10. **call_llm**: Formats response using OpenAI GPT-4, handles tool calls
+11. **execute_action**: Executes CRUD operations via tool registry
+12. **save_memory**: Persists conversation to `chat_history` table
 
 ## 📁 Project Structure
 
 ```
-service_chatbot/
+Edify-Service-Chatbot-Agent/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py                  # FastAPI application entry point
 │   ├── api/
 │   │   ├── routes/
-│   │   │   ├── chat.py         # Chat endpoints
-│   │   │   ├── session.py      # Session management
-│   │   │   └── health.py       # Health check
-│   │   └── dependencies.py     # API dependencies
+│   │   │   ├── chat.py          # Chat endpoints (/chat/message, /chat/history)
+│   │   │   ├── session.py       # Session management (/session/start, /session/end)
+│   │   │   └── health.py         # Health check endpoint
+│   │   └── dependencies.py      # API dependencies
 │   ├── core/
-│   │   ├── config.py           # Configuration management
-│   │   ├── logging.py          # Logging setup
-│   │   ├── security.py         # Security utilities
-│   │   └── contants.py         # Constants
+│   │   ├── config.py            # Configuration management (Settings, env vars)
+│   │   ├── logging.py            # Logging setup
+│   │   ├── security.py           # Security utilities
+│   │   └── contants.py           # Constants
 │   ├── db/
-│   │   ├── supabase.py         # Supabase client initialization
-│   │   ├── crm_repo.py         # CRM data repository
-│   │   ├── crm_repo.py         # CRM data repository
-│   │   ├── memory_repo.py      # Conversation memory
-│   │   ├── chat_history_repo.py # Chat history persistence
+│   │   ├── supabase.py           # Supabase client initialization (dual instances)
+│   │   ├── crm_repo.py           # CRM data repository (CRUD operations)
+│   │   ├── memory_repo.py        # Conversation memory repository
+│   │   ├── chat_history_repo.py  # Chat history persistence
 │   │   ├── retrieved_context_repo.py # Context tracking
-│   │   └── audit_repo.py       # Audit logging
+│   │   └── audit_repo.py         # Audit logging
 │   ├── langgraph/
-│   │   ├── state.py            # Agent state definition
-│   │   ├── graph.py            # LangGraph workflow definition
+│   │   ├── state.py              # Agent state definition
+│   │   ├── graph.py              # LangGraph workflow definition
 │   │   └── nodes/
-│   │       ├── validate_session.py
-│   │       ├── load_memory.py
-│   │       ├── decide_source.py
-│   │       ├── fetch_crm.py
-│   │       ├── fetch_crm.py
-│   │       ├── check_context.py
-│   │       ├── call_llm.py
-│   │       ├── save_memory.py
-│   │       └── fallback.py
+│   │       ├── validate_session.py    # Session validation node
+│   │       ├── load_memory.py         # Memory loading and intent detection
+│   │       ├── decide_source.py       # Intent detection logic
+│   │       ├── fetch_crm.py           # CRM data fetching
+│   │       ├── fetch_followup_leads.py # Follow-up leads fetching
+│   │       ├── fetch_lead_activity_summary.py # Lead summary fetching
+│   │       ├── generate_email_draft.py # Email draft generation
+│   │       ├── send_email_node.py      # Email sending
+│   │       ├── check_context.py       # Context validation
+│   │       ├── call_llm.py             # LLM response formatting
+│   │       ├── execute_action.py       # Tool execution
+│   │       └── save_memory.py          # Memory persistence
 │   ├── llm/
-│   │   ├── openai_client.py    # OpenAI client wrapper
-│   │   └── formatter.py        # Response formatting
+│   │   ├── openai_client.py     # OpenAI client wrapper
+│   │   └── formatter.py          # Response formatting utilities
 │   ├── services/
-│   │   ├── chat_service.py     # Chat orchestration service
-│   │   └── session_service.py # Session management service
+│   │   ├── chat_service.py       # Chat orchestration service
+│   │   ├── session_service.py    # Session management service
+│   │   ├── followup_service.py   # Follow-up lead service
+│   │   ├── lead_summary_service.py # Lead activity summary service
+│   │   ├── email_draft_service.py  # Email draft generation service
+│   │   ├── email_sender_service.py  # SMTP email sending service
+│   │   └── tool_registry.py      # CRUD tool registry
 │   ├── utils/
-│   │   └── cache.py            # Caching utilities
+│   │   ├── cache.py              # Caching utilities (Redis)
+│   │   └── retry.py              # Retry utilities
 │   └── migrations/
-│       └── schema.sql           # Database schema
-├── static/
-│   ├── index.html              # Frontend HTML
-│   ├── app.js                  # Frontend JavaScript
-│   └── styles.css             # Frontend styles
+│       └── schema.sql            # Database schema
 ├── scripts/
-│   └── pdf_to_embedding.py    # PDF ingestion script
-├── requirements.txt            # Python dependencies
-├── Dockerfile                  # Docker container configuration
-├── .dockerignore              # Docker ignore patterns
-└── README.md                   # This file
+│   ├── check-runner.sh           # Health check script
+│   └── deploy.sh                  # Deployment script
+├── nginx/
+│   └── edify-chatbot.conf        # Nginx configuration
+├── requirements.txt              # Python dependencies
+├── Dockerfile                    # Docker container configuration
+├── docker-compose.yml            # Docker Compose configuration
+├── docker-compose.prod.yml       # Production Docker Compose
+└── README.md                     # This file
 ```
 
 ## 🚀 Installation & Setup
@@ -199,7 +299,7 @@ service_chatbot/
 
 ```bash
 git clone <repository-url>
-cd service_chatbot
+cd Edify-Service-Chatbot-Agent
 ```
 
 ### Step 2: Create Virtual Environment
@@ -240,6 +340,14 @@ CHATBOT_SUPABASE_SERVICE_ROLE_KEY=your_chatbot_service_role_key
 ENV=local
 LOG_LEVEL=INFO
 
+# SMTP Email Configuration
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your_email@example.com
+SMTP_PASSWORD=your_app_password
+SMTP_USE_TLS=true
+EMAIL_FROM_NAME=Edify Sales Team
+
 # Optional: Rate Limiting
 ENABLE_RATE_LIMITING=false
 RATE_LIMIT_PER_MINUTE=10
@@ -277,8 +385,7 @@ MAX_PAGE_SIZE=200
 
 2. **Edify Supabase Database**: Ensure you have read-only access to:
    - CRM tables: `campaigns`, `leads`, `tasks`, `trainers`, `learners`, `Course`, `activity`, `notes`
-   - LMS tables: `batches`
-   - RMS tables: `job_openings`, `candidates`, `companies`, `interviews`, `tasks`
+   - Additional tables: `batches`, `emails`, `calls`, `meetings`, `messages`
 
 ### Step 6: Run Application
 
@@ -286,21 +393,15 @@ MAX_PAGE_SIZE=200
 # Development server (default port 8000)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# Production server (default port 8000)
+# Production server
 uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# Or use a different port (e.g., 8080)
-uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
 The application will be available at:
-- API: `http://localhost:8000` (or your chosen port)
-- Interactive Chat: `http://localhost:8000/docs` (or your chosen port)
-- Frontend: `http://localhost:8000/` (or your chosen port)
-- API Docs: `http://localhost:8000/docs` (Swagger UI)
-- OpenAPI Schema: `http://localhost:8000/openapi.json`
-
-> **Note:** If ports 3000 or 8000 are already in use, use port 8080 or any other available port.
+- **API**: `http://localhost:8000`
+- **API Docs**: `http://localhost:8000/docs` (Swagger UI)
+- **ReDoc**: `http://localhost:8000/redoc`
+- **Health Check**: `http://localhost:8000/health`
 
 ## ⚙️ Configuration
 
@@ -314,6 +415,17 @@ The application will be available at:
 | `CHATBOT_SUPABASE_URL` | Chatbot Supabase project URL |
 | `CHATBOT_SUPABASE_SERVICE_ROLE_KEY` | Chatbot Supabase service role key (read/write) |
 
+### SMTP Email Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SMTP_HOST` | SMTP server hostname | `smtp.gmail.com` |
+| `SMTP_PORT` | SMTP server port | `587` |
+| `SMTP_USERNAME` | SMTP username (sender email) | - |
+| `SMTP_PASSWORD` | SMTP password (app password) | - |
+| `SMTP_USE_TLS` | Use TLS encryption | `true` |
+| `EMAIL_FROM_NAME` | Sender display name | `Edify Sales Team` |
+
 ### Optional Optimizations
 
 All optimization features are **disabled by default** and can be enabled via environment variables:
@@ -324,170 +436,110 @@ All optimization features are **disabled by default** and can be enabled via env
 - **Request Timeout**: Prevent long-running requests
 - **Response Compression**: GZip compression for responses
 
-## 🔄 Workflows
+## 🔄 Core Functionalities
 
-### LangGraph Workflow
+### 1. Follow-up Lead Management
 
-The chatbot uses a state machine workflow with conditional routing:
+**Service**: `FollowUpService`
 
-```
-START
-  │
-  ▼
-[validate_session]
-  │
-  ├─→ Error → [save_memory] → END
-  └─→ Success
-      │
-      ▼
-[load_memory]
-  │
-  ▼
-[decide_source]
-  │
-  ├─→ CRM → [fetch_crm]
-  └─→ CRM → [fetch_crm]
-  └─→ General → [check_context]
-      │
-      ▼
-[check_context]
-  │
-  ├─→ No Data → [save_memory] → END
-  └─→ Has Data
-      │
-      ▼
-[call_llm]
-  │
-  ▼
-[save_memory]
-  │
-  ▼
-END
-```
+**Functionality**:
+- Queries leads where `next_follow_up <= NOW()` and `lead_status NOT IN ('Closed', 'Lost')`
+- Returns formatted list sorted by follow-up date (oldest first)
 
-### Node Descriptions
+**Example Queries**:
+- "Which leads need follow up today?"
+- "Show me leads requiring follow-up"
+- "Who needs follow up?"
 
-1. **validate_session**: Validates session ID, creates new session if needed
-2. **load_memory**: Loads last 5 conversation turns from database
-3. **decide_source**: Uses keyword matching + LLM to determine data source
-4. **fetch_***: Retrieves data from respective repositories
-5. **check_context**: Validates retrieved data, handles empty results
-6. **call_llm**: Formats response using OpenAI GPT-4
-7. **save_memory**: Persists conversation to `chat_history` table
+**Node**: `fetch_followup_leads_node`
 
-### Intent Detection
+### 2. Smart Email Draft Generation
 
-The system uses a two-stage intent detection:
+**Service**: `EmailDraftService`
 
-1. **Keyword Matching** (Fast, LENIENT):
-   - CRM: leads, trainers, learners, campaigns, tasks, courses
-   - LMS: batches, training schedules
-   - RMS: candidates, job openings, interviews, companies
-   - RAG: policies, documents, knowledge base
+**Functionality**:
+- Extracts lead identifier (ID or name) from query
+- Fetches lead details and latest interaction
+- Determines template type based on context:
+  - **Follow-up**: Last interaction was call with no response
+  - **Proposal**: Opportunity status is "Visiting"
+  - **Re-engagement**: No interaction for extended period
+  - **Meeting Confirmation**: Meeting scheduled
+  - **Objection Handling**: Price/objection keywords detected
+- Generates email draft using GPT-4 with lead context
+- Falls back to static templates if LLM fails
 
-2. **LLM Classification** (Fallback):
-   - Used when keywords are ambiguous
-   - GPT-4 classifies query into source type
+**Example Queries**:
+- "Draft follow-up email for lead Guna"
+- "Write email for lead 132"
+- "Compose proposal email for lead John"
 
-## 🗄️ Database Schema
+**Node**: `generate_email_draft_node`
 
-### Chatbot Supabase Tables
+### 3. Email Sending
 
-#### `admin_sessions`
-Stores user sessions.
+**Service**: `EmailSenderService`, `EmailDraftService`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| session_id | UUID | Primary key |
-| admin_id | UUID | User identifier |
-| status | TEXT | active/ended/expired |
-| created_at | TIMESTAMP | Session creation time |
-| last_activity | TIMESTAMP | Last activity time |
-| ended_at | TIMESTAMP | Session end time |
+**Functionality**:
+- Extracts lead identifier from query
+- Validates lead email address
+- Sends email via SMTP using configured credentials
+- Records email in `emails` table
+- Supports template-based sending (introduction, follow-up, meeting reminder)
 
-#### `chat_history`
-Stores complete conversation pairs.
+**Example Queries**:
+- "Send follow-up email to lead Guna"
+- "Send email to lead 132"
+- "Send introduction email to lead John"
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | BIGSERIAL | Primary key |
-| session_id | UUID | Foreign key to admin_sessions |
-| admin_id | UUID | User identifier |
-| user_message | TEXT | User's message |
-| assistant_response | TEXT | Bot's response |
-| source_type | TEXT | crm/lms/rms/rag/none |
-| response_time_ms | INTEGER | Response time |
-| tokens_used | INTEGER | Token count (optional) |
-| created_at | TIMESTAMP | Creation time |
+**Node**: `send_email_node`
 
-#### `retrieved_context`
-Tracks all data retrieval operations.
+### 4. Lead Activity Summary
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | BIGSERIAL | Primary key |
-| session_id | UUID | Foreign key |
-| admin_id | UUID | User identifier |
-| source_type | TEXT | crm/lms/rms/rag/none |
-| query_text | TEXT | Original query |
-| record_count | INTEGER | Number of records retrieved |
-| payload | JSONB | Retrieved data |
-| error_message | TEXT | Error if any |
-| retrieval_time_ms | INTEGER | Retrieval time |
-| created_at | TIMESTAMP | Creation time |
+**Service**: `LeadSummaryService`
 
-#### `rag_documents`
-Stores knowledge base documents.
+**Functionality**:
+- Extracts lead identifier (ID or name, case-insensitive)
+- Fetches lead details
+- Retrieves all activities:
+  - Calls (inbound/outbound)
+  - Emails (sent/received)
+  - Meetings (scheduled/completed)
+  - Notes (all notes)
+- Builds chronological timeline
+- Formats summary using GPT-4
+- Falls back to structured text if LLM unavailable
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID | Primary key |
-| file_name | TEXT | Document filename |
-| content | TEXT | Document content |
-| created_at | TIMESTAMP | Creation time |
+**Example Queries**:
+- "Give me full summary of lead Guna"
+- "Show activity summary for lead 132"
+- "What's the history of lead John?"
 
-#### `rag_embeddings`
-Stores vector embeddings for documents.
+**Node**: `fetch_lead_activity_summary_node`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| document_id | UUID | Foreign key to rag_documents |
-| embedding | vector(3072) | OpenAI embedding vector |
-| created_at | TIMESTAMP | Creation time |
+### 5. CRM Data Access
 
-#### `audit_logs`
-Comprehensive audit trail.
+**Service**: `CRMRepo`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | BIGSERIAL | Primary key |
-| admin_id | UUID | User identifier |
-| session_id | UUID | Session identifier |
-| action | TEXT | Action name |
-| metadata | JSONB | Action details |
-| created_at | TIMESTAMP | Creation time |
+**Functionality**:
+- Full CRUD operations on all CRM tables
+- Smart table detection from query keywords
+- Date filtering ("today", "yesterday", "this week", "new")
+- Multi-field text search
+- Pagination support
 
-### Edify Supabase Tables (Read-Only)
+**Supported Tables**:
+- `campaigns`, `leads`, `tasks`, `trainers`, `learners`, `Course`, `activity`, `notes`
+- `batches`, `emails`, `calls`, `meetings`, `messages`
 
-#### CRM Tables
-- `campaigns`: Marketing campaigns
-- `leads`: Customer leads
-- `tasks`: Task management
-- `trainers`: Trainer information
-- `learners`: Learner information
-- `Course`: Course catalog
-- `activity`: Activity logs
-- `notes`: Notes and comments
+**Example Queries**:
+- "Show me all leads"
+- "List trainers in New York"
+- "What campaigns are active?"
+- "Show me tasks due today"
+- "Create a new lead named John Doe"
 
-#### LMS Tables
-- `batches`: Training batches
-
-#### RMS Tables
-- `job_openings`: Job postings
-- `candidates`: Candidate profiles
-- `companies`: Company information
-- `interviews`: Interview schedules
-- `tasks`: Recruitment tasks
+**Node**: `fetch_crm_node` → `call_llm_node` → `execute_action_node`
 
 ## 🔌 API Endpoints
 
@@ -528,12 +580,12 @@ End a session.
 ### Chat
 
 #### `POST /chat/message`
-Send a chat message.
+Send a chat message and get AI response.
 
 **Request:**
 ```json
 {
-  "message": "Show me all job openings",
+  "message": "Show me all leads",
   "session_id": "uuid"
 }
 ```
@@ -541,8 +593,34 @@ Send a chat message.
 **Response:**
 ```json
 {
-  "response": "Here are the job openings...",
+  "response": "Here are all the leads...",
   "session_id": "uuid"
+}
+```
+
+#### `GET /chat/history/{session_id}`
+Retrieve chat history for a session.
+
+**Query Parameters:**
+- `limit` (optional): Number of records (1-200, default: 50)
+
+**Response:**
+```json
+{
+  "session_id": "uuid",
+  "count": 10,
+  "history": [
+    {
+      "id": 1,
+      "session_id": "uuid",
+      "admin_id": "anonymous",
+      "user_message": "Show me all leads",
+      "assistant_response": "Here are all the leads...",
+      "source_type": "crm",
+      "response_time_ms": 1234,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  ]
 }
 ```
 
@@ -554,98 +632,90 @@ Health check endpoint.
 **Response:**
 ```json
 {
-  "status": "healthy",
-  "timestamp": "2024-01-01T00:00:00Z"
+  "status": "ok",
+  "service": "Edify Admin AI Agent"
 }
 ```
 
-## 📊 Data Sources
+## 🗄️ Database Schema
 
-### CRM (Customer Relationship Management)
+### Chatbot Supabase Tables
 
-**Supported Tables:**
+#### `admin_sessions`
+Stores user sessions.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| session_id | UUID | Primary key |
+| admin_id | UUID | User identifier |
+| status | TEXT | active/ended/expired |
+| created_at | TIMESTAMP | Session creation time |
+| last_activity | TIMESTAMP | Last activity time |
+| ended_at | TIMESTAMP | Session end time |
+
+#### `chat_history`
+Stores complete conversation pairs.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | BIGSERIAL | Primary key |
+| session_id | UUID | Foreign key to admin_sessions |
+| admin_id | UUID | User identifier |
+| user_message | TEXT | User's message |
+| assistant_response | TEXT | Bot's response |
+| source_type | TEXT | crm/followup/email_draft/send_email/lead_summary/none |
+| response_time_ms | INTEGER | Response time |
+| tokens_used | INTEGER | Token count (optional) |
+| created_at | TIMESTAMP | Creation time |
+
+#### `retrieved_context`
+Tracks all data retrieval operations.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | BIGSERIAL | Primary key |
+| session_id | UUID | Foreign key |
+| admin_id | UUID | User identifier |
+| source_type | TEXT | crm/followup/email_draft/send_email/lead_summary |
+| query_text | TEXT | Original query |
+| record_count | INTEGER | Number of records retrieved |
+| payload | JSONB | Retrieved data |
+| error_message | TEXT | Error if any |
+| retrieval_time_ms | INTEGER | Retrieval time |
+| created_at | TIMESTAMP | Creation time |
+
+#### `audit_logs`
+Comprehensive audit trail.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | BIGSERIAL | Primary key |
+| admin_id | UUID | User identifier |
+| session_id | UUID | Session identifier |
+| action | TEXT | Action name |
+| metadata | JSONB | Action details |
+| created_at | TIMESTAMP | Creation time |
+
+### Edify Supabase Tables (Read-Only)
+
+#### CRM Tables
 - `campaigns`: Marketing campaigns
-- `leads`: Customer leads and prospects
+- `leads`: Customer leads (includes `next_follow_up`, `lead_status`, `lead_owner`)
 - `tasks`: Task management
-- `trainers`: Trainer profiles
-- `learners`: Learner profiles
+- `trainers`: Trainer information
+- `learners`: Learner information
 - `Course`: Course catalog
 - `activity`: Activity logs
 - `notes`: Notes and comments
-
-**Query Examples:**
-- "Show me all leads"
-- "List trainers in New York"
-- "What campaigns are active?"
-- "Show me tasks due today"
-
-**Features:**
-- Automatic table detection based on keywords
-- Date filtering (today, yesterday, this week, new)
-- Text search across multiple fields
-- Pagination support
-
-### LMS (Learning Management System)
-
-**Supported Tables:**
-- `batches`: Training batches and schedules
-
-**Query Examples:**
-- "Show me all batches"
-- "List upcoming training batches"
-- "What batches are scheduled this week?"
-
-**Features:**
-- Batch schedule queries
-- Date-based filtering
-- Status filtering
-
-### RMS (Recruitment Management System)
-
-**Supported Tables:**
-- `job_openings`: Job postings and openings
-- `candidates`: Candidate profiles
-- `companies`: Company information
-- `interviews`: Interview schedules
-- `tasks`: Recruitment tasks
-
-**Query Examples:**
-- "Show me all job openings"
-- "List candidates in New York"
-- "What companies do we have?"
-- "Show interviews scheduled for today"
-- "RMS tasks with high priority"
-
-**Features:**
-- Intelligent table detection
-- Multi-field search
-- Date filtering
-- Status filtering
-
-### RAG (Retrieval-Augmented Generation)
-
-**Capabilities:**
-- Vector similarity search
-- Document retrieval
-- Knowledge base queries
-
-**Query Examples:**
-- "What is the refund policy?"
-- "How do I reset my password?"
-- "Show me the user manual"
-
-**Features:**
-- Semantic search using embeddings
-- Similarity threshold filtering
-- Document content retrieval
+- `batches`: Training batches
+- `emails`: Email records
+- `calls`: Call records
+- `meetings`: Meeting records
+- `messages`: Message records
 
 ## 🚢 Deployment
 
-> **📖 For detailed step-by-step deployment instructions with domain and SSL setup, see [DEPLOYMENT.md](DEPLOYMENT.md)**
-
 ### Quick Start - Docker Deployment
-
-The application is containerized and ready for deployment using Docker.
 
 #### Build the Docker Image
 
@@ -664,35 +734,7 @@ docker run -d \
   edify-chatbot
 ```
 
-**Using a custom port:**
-```bash
-docker run -d \
-  --name edify-chatbot \
-  -p 8081:8081 \
-  -e PORT=8081 \
-  --env-file .env \
-  edify-chatbot
-```
-
-**Using environment variables directly:**
-```bash
-docker run -d \
-  --name edify-chatbot \
-  -p 8080:8080 \
-  -e PORT=8080 \
-  -e OPENAI_API_KEY=your_key \
-  -e EDIFY_SUPABASE_URL=your_url \
-  -e EDIFY_SUPABASE_SERVICE_ROLE_KEY=your_key \
-  -e CHATBOT_SUPABASE_URL=your_url \
-  -e CHATBOT_SUPABASE_SERVICE_ROLE_KEY=your_key \
-  edify-chatbot
-```
-
-> **Note:** The default port is **8080** to avoid conflicts with common ports 3000 and 8000. You can change it by setting the `PORT` environment variable.
-
 #### Docker Compose (Recommended)
-
-A `docker-compose.yml` file is already included. To use a custom port, set the `PORT` environment variable:
 
 ```bash
 # Use default port 8080
@@ -702,9 +744,7 @@ docker-compose up -d
 PORT=8081 docker-compose up -d
 ```
 
-You can also edit the `docker-compose.yml` file to change the port mapping directly.
-
-#### Production Deployment
+### Production Deployment
 
 For production, consider:
 
@@ -713,80 +753,6 @@ For production, consider:
 3. **Use Docker secrets** or a secrets management service
 4. **Configure resource limits** in docker-compose or Kubernetes
 5. **Set up health checks** and monitoring
-
-Example with resource limits:
-```yaml
-services:
-  chatbot:
-    build: .
-    ports:
-      - "8080:8080"
-    env_file:
-      - .env
-    environment:
-      - PORT=8080
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1'
-          memory: 1G
-```
-
-#### Kubernetes Deployment
-
-For Kubernetes, create deployment and service manifests:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: edify-chatbot
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: edify-chatbot
-  template:
-    metadata:
-      labels:
-        app: edify-chatbot
-    spec:
-      containers:
-      - name: chatbot
-        image: edify-chatbot:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: PORT
-          value: "8080"
-        envFrom:
-        - secretRef:
-            name: edify-chatbot-secrets
-        resources:
-          requests:
-            memory: "1Gi"
-            cpu: "1"
-          limits:
-            memory: "2Gi"
-            cpu: "2"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: edify-chatbot-service
-spec:
-  selector:
-    app: edify-chatbot
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 8080
-  type: LoadBalancer
-```
 
 ### Environment-Specific Configuration
 
@@ -803,13 +769,13 @@ spec:
 - **Nodes** (`app/langgraph/nodes/`): Workflow nodes, single responsibility
 - **Routes** (`app/api/routes/`): API endpoints, request/response handling
 
-### Adding a New Data Source
+### Adding a New Feature
 
-1. Create repository in `app/db/` (e.g., `new_source_repo.py`)
-2. Create fetch node in `app/langgraph/nodes/` (e.g., `fetch_new_source.py`)
-3. Add to `decide_source.py` keyword detection
+1. Create service in `app/services/` (if needed)
+2. Create node in `app/langgraph/nodes/` (if needed)
+3. Add intent detection in `decide_source.py`
 4. Add node to `graph.py` workflow
-5. Update `TABLE_CONFIGS` in repository
+5. Update routing logic
 
 ### Code Style
 
@@ -859,17 +825,17 @@ pytest
 - **Issue**: OpenAI API key invalid or rate limited
 - **Solution**: Check API key and usage limits
 
-#### 3. Vector Search Not Working
-- **Issue**: RPC function `match_documents` not found
-- **Solution**: Run migration script to create RPC function
+#### 3. Email Sending Fails
+- **Issue**: SMTP authentication fails
+- **Solution**: Verify SMTP credentials, check app password for Gmail
 
-#### 4. Session Not Found
+#### 4. Lead Not Found
+- **Issue**: Lead identifier not recognized
+- **Solution**: Ensure lead ID is numeric or name matches exactly (case-insensitive)
+
+#### 5. Session Not Found
 - **Issue**: Session ID not recognized
 - **Solution**: Sessions are created automatically, ensure session_id is valid UUID
-
-#### 5. No Data Returned
-- **Issue**: Query returns empty results
-- **Solution**: Check table names, field names, and data availability in Edify Supabase
 
 ### Debugging
 
@@ -927,5 +893,3 @@ For issues and questions:
 ---
 
 **Built with ❤️ for Edify Admin Platform**
-
-Trigger
