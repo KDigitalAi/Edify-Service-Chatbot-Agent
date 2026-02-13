@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.api.routes import session, chat, health
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 setup_logging()
@@ -73,19 +76,28 @@ if settings.ENABLE_RATE_LIMITING:
         logger.warning("slowapi not installed - rate limiting disabled. Install with: pip install slowapi")
         settings.ENABLE_RATE_LIMITING = False
 
-# Root endpoint - API information
+# Serve static files (frontend)
+static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    logger.info(f"Serving static files from: {static_dir}")
+
+# Root endpoint - Serve frontend or API info
 @app.get("/")
 async def read_root():
     """
-    Root endpoint providing API information.
-    Use /docs for interactive API documentation (Swagger UI).
+    Root endpoint - serves frontend if available, otherwise returns API info.
     """
+    index_path = os.path.join(static_dir, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
     return {
-        "service": "Edify Admin AI Service Agent",
+        "service": "SalesBot - CRM Agentic AI",
         "version": "1.0.0",
         "docs": "/docs",
         "redoc": "/redoc",
-        "health": "/health"
+        "health": "/health",
+        "frontend": "/static/index.html"
     }
 
 # Include API routers

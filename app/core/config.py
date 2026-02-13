@@ -23,8 +23,8 @@ class Settings(BaseModel):
     """
     Application settings loaded from environment variables.
     Supports dual Supabase configuration:
-    - Edify Supabase: Read-only data source (CRM/LMS/RMS)
-    - Chatbot Supabase: Read/write database (sessions/memory/RAG/audit)
+    - Edify Supabase: Read/write data source (CRM operations)
+    - Chatbot Supabase: Read/write database (sessions/memory/audit)
     
     Optimization features are optional and can be enabled via environment variables.
     All optimizations are non-breaking and disabled by default.

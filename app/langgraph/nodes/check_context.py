@@ -32,7 +32,7 @@ def check_context_node(state: AgentState) -> Dict[str, Any]:
         if not is_greeting(user_message):
             logger.warning(f"Blocked general knowledge query: {user_message[:100]}")
             return {
-                "response": "I can only answer questions related to Edify CRM, LMS, RMS, or internal documents."
+                "response": "I can only answer questions related to Edify CRM data."
             }
         # If it's a greeting, allow it to pass (greetings are handled by decide_source)
         return {}
@@ -42,7 +42,7 @@ def check_context_node(state: AgentState) -> Dict[str, Any]:
         return {}
         
     if not context or (isinstance(context, list) and len(context) == 0):
-        # No data found - this should be rare for valid CRM/LMS/RMS/RAG intents
+        # No data found - this should be rare for valid CRM intents
         # Log this as it indicates a potential issue with data retrieval
         query = state.get("user_message", "")
         logger.warning(f"No data found for {source} query: {query[:100]}")

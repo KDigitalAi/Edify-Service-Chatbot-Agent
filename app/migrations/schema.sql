@@ -10,7 +10,6 @@
 -- ============================================================================
 
 -- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================================
@@ -32,6 +31,13 @@ DROP TABLE IF EXISTS admin_query CASCADE;
 DROP TABLE IF EXISTS sessions CASCADE;
 DROP TABLE IF EXISTS document_embeddings CASCADE;
 DROP TABLE IF EXISTS knowledge_documents CASCADE;
+
+-- Remove RAG tables (not implemented)
+DROP TABLE IF EXISTS rag_embeddings CASCADE;
+DROP TABLE IF EXISTS rag_documents CASCADE;
+
+-- Remove RAG function (not implemented)
+DROP FUNCTION IF EXISTS match_documents(vector, float, int) CASCADE;
 
 -- ============================================================================
 -- STEP 2: Create admin_sessions Table
@@ -63,7 +69,7 @@ CREATE TABLE retrieved_context (
     id BIGSERIAL PRIMARY KEY,
     session_id UUID NOT NULL REFERENCES admin_sessions(session_id) ON DELETE CASCADE,
     admin_id UUID NOT NULL,
-    source_type TEXT NOT NULL CHECK (source_type IN ('crm', 'lms', 'rms', 'rag', 'none')),
+    source_type TEXT NOT NULL CHECK (source_type IN ('crm', 'lms', 'rms', 'rag', 'none', 'entity_memory', 'pending_action')),
     query_text TEXT NOT NULL,
     record_count INTEGER DEFAULT 0,
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -80,65 +86,7 @@ CREATE INDEX idx_retrieved_context_payload ON retrieved_context USING GIN(payloa
 CREATE INDEX idx_retrieved_context_session_created ON retrieved_context(session_id, created_at DESC);
 
 -- ============================================================================
--- STEP 5: Create RAG Tables (rag_documents, rag_embeddings)
--- ============================================================================
-
-DROP TABLE IF EXISTS rag_embeddings CASCADE;
-DROP TABLE IF EXISTS rag_documents CASCADE;
-
-CREATE TABLE rag_documents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    file_name TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX idx_rag_documents_file_name ON rag_documents(file_name);
-CREATE INDEX idx_rag_documents_created_at ON rag_documents(created_at DESC);
-
-CREATE TABLE rag_embeddings (
-    document_id UUID NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
-    embedding vector(3072) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- NOTE: Vector indexes (IVFFlat/HNSW) are limited to 2000 dimensions in this pgvector version
--- Since we're using vector(3072), we cannot create an index
--- Queries will use sequential scan (slower but functional)
--- To use an index, reduce dimension to 2000 or less, or upgrade pgvector version
-
-CREATE INDEX idx_rag_embeddings_created_at ON rag_embeddings(created_at DESC);
-
--- RPC Function: match_documents
--- Performs vector similarity search for RAG retrieval
-CREATE OR REPLACE FUNCTION match_documents(
-    query_embedding vector(3072),
-    match_threshold float DEFAULT 0.5,
-    match_count int DEFAULT 5
-)
-RETURNS TABLE (
-    content text,
-    similarity float,
-    file_name text
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        d.content,
-        1 - (e.embedding <=> query_embedding) as similarity,
-        d.file_name
-    FROM rag_embeddings e
-    INNER JOIN rag_documents d ON e.document_id = d.id
-    WHERE 1 - (e.embedding <=> query_embedding) > match_threshold
-    ORDER BY e.embedding <=> query_embedding
-    LIMIT match_count;
-END;
-$$;
-
--- ============================================================================
--- STEP 6: Create audit_logs Table
+-- STEP 4: Create audit_logs Table
 -- ============================================================================
 
 DROP TABLE IF EXISTS audit_logs CASCADE;
@@ -159,7 +107,7 @@ CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at DESC);
 CREATE INDEX idx_audit_logs_metadata ON audit_logs USING GIN(metadata);
 
 -- ============================================================================
--- STEP 7: Create chat_history Table
+-- STEP 5: Create chat_history Table
 -- ============================================================================
 
 DROP TABLE IF EXISTS chat_history CASCADE;

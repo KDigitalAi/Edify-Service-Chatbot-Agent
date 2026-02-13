@@ -141,42 +141,6 @@ def cache_key_crm_query(query: str, table: str, limit: Optional[int] = None, pag
     query_hash = hashlib.md5(key_string.encode()).hexdigest()
     return f"crm_query:{table}:{query_hash}"
 
-def cache_key_rms_query(query: str, table: str, limit: Optional[int] = None, page: Optional[int] = None, page_size: Optional[int] = None) -> str:
-    """
-    Generate cache key for RMS query.
-    Includes: normalized query, table name, pagination params.
-    """
-    import hashlib
-    normalized_query = _normalize_query(query)
-    # Include pagination in key if provided
-    pagination_str = ""
-    if page is not None and page_size is not None:
-        pagination_str = f":page:{page}:size:{page_size}"
-    elif limit is not None:
-        pagination_str = f":limit:{limit}"
-    
-    key_string = f"{normalized_query}:{table}{pagination_str}"
-    query_hash = hashlib.md5(key_string.encode()).hexdigest()
-    return f"rms_query:{table}:{query_hash}"
-
-def cache_key_lms_query(query: str, limit: Optional[int] = None, page: Optional[int] = None, page_size: Optional[int] = None) -> str:
-    """
-    Generate cache key for LMS query.
-    Includes: normalized query, pagination params.
-    """
-    import hashlib
-    normalized_query = _normalize_query(query)
-    # Include pagination in key if provided
-    pagination_str = ""
-    if page is not None and page_size is not None:
-        pagination_str = f":page:{page}:size:{page_size}"
-    elif limit is not None:
-        pagination_str = f":limit:{limit}"
-    
-    key_string = f"{normalized_query}{pagination_str}"
-    query_hash = hashlib.md5(key_string.encode()).hexdigest()
-    return f"lms_query:{query_hash}"
-
 def cache_key_llm_response(query: str, context_hash: str) -> str:
     """Generate cache key for LLM response."""
     import hashlib

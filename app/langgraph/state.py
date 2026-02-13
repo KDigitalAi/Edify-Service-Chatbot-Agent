@@ -3,7 +3,7 @@ import operator
 
 class AgentState(TypedDict):
     """
-    State model for Edify Admin AI Chatbot.
+    State model for SalesBot CRM Agentic AI.
     """
     session_id: str
     admin_id: str
@@ -12,3 +12,7 @@ class AgentState(TypedDict):
     retrieved_context: Optional[Any]
     source_type: Optional[str]
     response: Optional[str]
+    tool_calls: Optional[List[Dict[str, Any]]]  # LLM function calls
+    action_results: Optional[List[Dict[str, Any]]]  # Results from executed actions
+    requires_confirmation: Optional[bool]  # For destructive actions
+    pending_action: Optional[Dict[str, Any]]  # Action waiting for confirmation

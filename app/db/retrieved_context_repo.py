@@ -9,7 +9,7 @@ class RetrievedContextRepo:
     """
     Repository for storing retrieved context data.
     Improved schema with better tracking: query, record count, errors, timing.
-    Persists verified data retrieved from CRM/LMS/RMS/RAG sources.
+    Persists verified data retrieved from CRM sources.
     """
     
     def __init__(self):
@@ -33,7 +33,7 @@ class RetrievedContextRepo:
         Args:
             session_id: Session UUID
             admin_id: Admin/user ID (will be converted to UUID if needed)
-            source_type: One of 'crm', 'lms', 'rms', 'rag', 'none'
+            source_type: One of 'crm', 'none', 'entity_memory', 'pending_action'
             query_text: The original query that triggered this retrieval
             payload: The actual data retrieved (will be stored as JSONB)
             record_count: Number of records retrieved (auto-calculated if None)

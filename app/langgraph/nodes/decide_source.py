@@ -75,9 +75,9 @@ def normalize_input(text: str) -> str:
 
 def detect_intent_keywords(query: str) -> Optional[str]:
     """
-    Robust keyword-based intent detection (LENIENT approach).
-    Detects CRM/LMS/RMS/RAG intent using keyword matching.
-    Returns source type or None if unclear.
+    CRM-only intent detection.
+    All queries default to CRM since SalesBot only handles CRM operations.
+    Returns "crm" for all valid queries, None only for greetings.
     """
     normalized = normalize_input(query)
     
@@ -104,53 +104,14 @@ def detect_intent_keywords(query: str) -> Optional[str]:
         'crm', 'crm data', 'crm information'
     ]
     
-    # LMS keywords
-    lms_keywords = [
-        'batch', 'batches', 'training batch', 'lms batch', 'lms batches',
-        'batch schedule', 'batch schedules', 'lms'
-    ]
-    
-    # RMS keywords
-    rms_keywords = [
-        'candidate', 'candidates', 'recruitment', 'job', 'jobs',
-        'position', 'positions', 'rms', 'rms candidate', 'rms candidates',
-        'job opening', 'job openings', 'opening', 'openings', 'vacancy', 'vacancies',
-        'interview', 'interviews', 'screening', 'screenings',
-        'company', 'companies', 'organization', 'organizations', 'employer', 'employers',
-        'hiring', 'hiring manager', 'recruiter', 'recruiters'
-    ]
-    
-    # RAG keywords
-    rag_keywords = [
-        'policy', 'policies', 'document', 'documents', 'knowledge base',
-        'knowledge', 'guide', 'guides', 'manual', 'manuals', 'rag'
-    ]
-    
-    # Check for CRM keywords (most comprehensive)
+    # Check for CRM keywords
     for keyword in crm_keywords:
         if re.search(rf'\b{re.escape(keyword)}\b', normalized):
             logger.info(f"CRM intent detected via keyword: {keyword}")
             return "crm"
     
-    # Check for LMS keywords
-    for keyword in lms_keywords:
-        if re.search(rf'\b{re.escape(keyword)}\b', normalized):
-            logger.info(f"LMS intent detected via keyword: {keyword}")
-            return "lms"
-    
-    # Check for RMS keywords
-    for keyword in rms_keywords:
-        if re.search(rf'\b{re.escape(keyword)}\b', normalized):
-            logger.info(f"RMS intent detected via keyword: {keyword}")
-            return "rms"
-    
-    # Check for RAG keywords
-    for keyword in rag_keywords:
-        if re.search(rf'\b{re.escape(keyword)}\b', normalized):
-            logger.info(f"RAG intent detected via keyword: {keyword}")
-            return "rag"
-    
-    return None
+    # Default to CRM for all other queries (SalesBot is CRM-only)
+    return "crm"
 
 def decide_source_node(state: AgentState) -> Dict[str, Any]:
     """
@@ -174,72 +135,10 @@ def decide_source_node(state: AgentState) -> Dict[str, Any]:
             logger.info(f"Intent detected via keywords: {keyword_intent}")
             return {"source_type": keyword_intent}
         
-        # STEP 2: Fallback to LLM for ambiguous cases
-        logger.info("No clear keyword match, using LLM for classification")
-        # Temporarily remove proxy env vars to prevent OpenAI client from reading them
-        # The newer OpenAI client doesn't support proxies parameter
-        saved_proxy_vars = {}
-        proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
-        for var in proxy_vars:
-            if var in os.environ:
-                saved_proxy_vars[var] = os.environ.pop(var)
-        
-        try:
-            # Create ChatOpenAI without proxies - LangChain handles HTTP internally
-            llm = ChatOpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                model="gpt-4o"
-            )
-        finally:
-            # Restore proxy env vars
-            os.environ.update(saved_proxy_vars)
-        
-        system_prompt = """You are a router. Classify the user's request into the correct data source.
-
-        IMPORTANT: CRM contains ALL of these entities:
-        - Leads, Prospects, Customers
-        - Trainers, Instructors (NOT in LMS - they are in CRM)
-        - Learners, Students (NOT in LMS - they are in CRM)
-        - Campaigns, Marketing campaigns
-        - Tasks, Todos
-        - Activities, Activity logs
-        - Notes, Comments
-        - Courses (Course table is in CRM, not LMS)
-        
-        Categories:
-        - "crm": All CRM data including Leads, Trainers, Learners, Campaigns, Tasks, Activities, Notes, Courses
-        - "lms": Training batches and batch schedules only (NOT trainers or learners - those are in CRM)
-        - "rms": Candidate/Job/Recruitment data including Job Openings, Candidates, Companies, Interviews, and RMS Tasks
-        - "rag": Policy/Knowledge base/Documents
-        - "general": Off-topic or unclear requests
-        
-        CRITICAL RULES:
-        1. Trainers/Instructors → ALWAYS "crm" (NOT "lms")
-        2. Learners/Students → ALWAYS "crm" (NOT "lms")
-        3. Courses → "crm" (Course table is in CRM)
-        4. Only training batches/schedules → "lms"
-        5. Job openings, positions, vacancies, candidates, interviews, companies → "rms"
-        6. Tasks in recruitment context → "rms", otherwise "crm"
-        
-        Return ONLY the category name.
-        """
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("user", "{input}")
-        ])
-        
-        chain = prompt | llm
-        result = chain.invoke({"input": user_message})
-        source = result.content.strip().lower()
-        
-        valid_sources = ["crm", "lms", "rms", "rag", "general"]
-        if source not in valid_sources:
-            source = "general"
-            
-        logger.info(f"Decided source: {source}")
-        
-        return {"source_type": source}
+        # STEP 2: Default to CRM (SalesBot is CRM-only)
+        # No LLM fallback needed - all queries route to CRM
+        logger.info("Defaulting to CRM (SalesBot is CRM-only)")
+        return {"source_type": "crm"}
         
     except Exception as e:
         logger.error(f"Error in decide_source: {e}", exc_info=True)

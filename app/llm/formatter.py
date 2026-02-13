@@ -110,7 +110,7 @@ class ResponseFormatter:
                     from app.langgraph.nodes.decide_source import is_greeting
                     if not is_greeting(query):
                         logger.warning(f"ResponseFormatter blocked general query without context: {query[:100]}")
-                        return "I can only answer questions related to Edify CRM, LMS, RMS, or internal documents."
+                        return "I can only answer questions related to Edify CRM data."
             
             if not context and source != "general":
                 return "I searched the records but found no matching data for your request."

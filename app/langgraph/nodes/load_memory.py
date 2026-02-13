@@ -99,10 +99,24 @@ def load_memory_node(state: AgentState) -> Dict[str, Any]:
     Optimized: Only loads history when needed (follow-up questions, context-dependent queries).
     Skips history for greetings and simple list-only queries.
     
-    Output format remains unchanged: always returns {"conversation_history": [...]}
+    Also extracts entity memory from conversation history (last created/updated entity IDs).
+    Handles greeting detection and sets appropriate state.
+    
+    Output format: returns {"conversation_history": [...], "entity_memory": {...}}
     """
     try:
+        from app.langgraph.nodes.decide_source import is_greeting, get_greeting_response
+        
         user_message = state.get("user_message", "")
+        
+        # Handle greetings - set response and source_type
+        if is_greeting(user_message):
+            logger.info("Greeting detected in load_memory, setting response")
+            return {
+                "source_type": "none",
+                "response": get_greeting_response(),
+                "conversation_history": []
+            }
         
         # Check if history is needed
         if not _needs_history(user_message):
@@ -114,8 +128,56 @@ def load_memory_node(state: AgentState) -> Dict[str, Any]:
         repo = MemoryRepo()
         history = repo.get_chat_history(session_id, limit=10)
         
+        # ENTITY MEMORY: Load persisted entity memory from database
+        # This provides cross-request continuity for ALL CRM entities
+        entity_memory = {}
+        try:
+            entity_mem = repo.get_entity_memory(session_id)
+            if entity_mem:
+                entity_type = entity_mem.get("entity_type")
+                entity_id = entity_mem.get("entity_id")
+                entity_name = entity_mem.get("entity_name")
+                
+                if entity_type and entity_id:
+                    # Set generic last entity fields
+                    entity_memory["last_entity_type"] = entity_type
+                    entity_memory["last_entity_id"] = entity_id
+                    
+                    # Set entity-specific fields for backward compatibility
+                    entity_memory[f"last_{entity_type}_id"] = entity_id
+                    
+                    if entity_name:
+                        entity_memory["last_entity_name"] = entity_name
+                        entity_memory[f"last_{entity_type}_name"] = entity_name
+                    
+                    logger.info(f"Restored entity memory: {entity_type} {entity_id} for session {session_id[:8]}...")
+        except Exception as e:
+            logger.warning(f"Failed to load entity memory: {e}")
+        
+        # PENDING ACTION: Load persisted pending action from database
+        # This provides cross-request continuity for confirmation flows
+        pending_action_memory = {}
+        try:
+            pending_action = repo.get_pending_action(session_id)
+            if pending_action:
+                pending_action_memory["pending_action"] = {
+                    "tool_name": pending_action.get("tool_name"),
+                    "arguments": pending_action.get("arguments", {})
+                }
+                pending_action_memory["requires_confirmation"] = True
+                logger.info(f"Restored pending action: {pending_action.get('tool_name')} for session {session_id[:8]}...")
+        except Exception as e:
+            logger.warning(f"Failed to load pending action: {e}")
+        
         logger.debug(f"Loaded {len(history)} history messages for session {session_id[:8]}...")
-        return {"conversation_history": history}
+        if entity_memory:
+            logger.debug(f"Entity memory restored: {list(entity_memory.keys())}")
+        
+        return {
+            "conversation_history": history,
+            **entity_memory,  # Inject entity memory into state
+            **pending_action_memory  # Inject pending action memory into state
+        }
         
     except Exception as e:
         logger.error(f"Error loading memory: {e}")

@@ -59,14 +59,40 @@ def _restore_proxy_env(saved: dict):
 def get_edify_supabase_client() -> Client:
     """
     Returns a singleton Supabase client for Edify Production database.
-    READ-ONLY access only - used for CRM, LMS, RMS data retrieval.
+    READ/WRITE access - used for CRM data operations (read and write).
     Uses service_role key (backend-only).
     Optional connection pooling: Uses httpx client with pooling if enabled.
     """
     global _edify_supabase_client
 
     if _edify_supabase_client is None:
-        logger.info("Initializing Edify Supabase client (read-only)")
+        logger.info("Initializing Edify Supabase client for CRM operations")
+        
+        # CRITICAL: Log Supabase configuration for debugging
+        supabase_url = settings.EDIFY_SUPABASE_URL
+        service_key = settings.EDIFY_SUPABASE_SERVICE_ROLE_KEY
+        
+        # Log URL (safe to log - it's public)
+        logger.info(f"EDIFY_SUPABASE_URL: {supabase_url}")
+        logger.info(f"EDIFY_SUPABASE_URL length: {len(supabase_url) if supabase_url else 0} chars")
+        logger.info(f"EDIFY_SUPABASE_URL starts with https: {supabase_url.startswith('https://') if supabase_url else False}")
+        
+        # Log service key info (without exposing the key)
+        if service_key:
+            logger.info(f"EDIFY_SUPABASE_SERVICE_ROLE_KEY: Present (length: {len(service_key)} chars)")
+            logger.info(f"EDIFY_SUPABASE_SERVICE_ROLE_KEY starts with eyJ: {service_key.startswith('eyJ')}")
+            logger.info(f"EDIFY_SUPABASE_SERVICE_ROLE_KEY is service_role: {'service_role' in service_key or len(service_key) > 100}")
+            # Check for whitespace
+            if service_key != service_key.strip():
+                logger.warning("WARNING: EDIFY_SUPABASE_SERVICE_ROLE_KEY contains leading/trailing whitespace!")
+        else:
+            logger.error("ERROR: EDIFY_SUPABASE_SERVICE_ROLE_KEY is empty or missing!")
+        
+        # Validate configuration
+        if not supabase_url:
+            raise ValueError("EDIFY_SUPABASE_URL is not set in environment variables")
+        if not service_key:
+            raise ValueError("EDIFY_SUPABASE_SERVICE_ROLE_KEY is not set in environment variables")
         
         # Optional: Configure connection pooling if enabled
         _configure_connection_pooling()
@@ -80,9 +106,13 @@ def get_edify_supabase_client() -> Client:
             # Connection pooling is handled at the httpx level and is active by default
             # When ENABLE_CONNECTION_POOLING=true, pool configuration is applied via environment
             _edify_supabase_client = create_client(
-                settings.EDIFY_SUPABASE_URL,
-                settings.EDIFY_SUPABASE_SERVICE_ROLE_KEY
+                supabase_url.strip(),  # Remove any whitespace
+                service_key.strip()    # Remove any whitespace
             )
+            logger.info("Edify Supabase client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Edify Supabase client: {e}", exc_info=True)
+            raise
         finally:
             _restore_proxy_env(saved_proxy)
 

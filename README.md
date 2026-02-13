@@ -1,6 +1,6 @@
 # Edify Admin AI Service Agent
 
-A comprehensive AI-powered chatbot service for Edify Admin platform that provides intelligent access to CRM, LMS, RMS, and RAG (Retrieval-Augmented Generation) data sources through natural language conversations.
+A comprehensive AI-powered CRM chatbot service (SalesBot) for Edify Admin platform that provides intelligent access to CRM data sources through natural language conversations.
 
 ## 📋 Table of Contents
 
@@ -24,16 +24,14 @@ A comprehensive AI-powered chatbot service for Edify Admin platform that provide
 The Edify Admin AI Service Agent is an intelligent chatbot that enables users to query and retrieve information from multiple data sources:
 
 - **CRM (Customer Relationship Management)**: Leads, campaigns, trainers, learners, tasks, activities, notes, courses
-- **LMS (Learning Management System)**: Training batches and schedules
-- **RMS (Recruitment Management System)**: Job openings, candidates, companies, interviews, tasks
-- **RAG (Retrieval-Augmented Generation)**: Knowledge base documents, policies, manuals
+SalesBot is a CRM-only agentic AI that provides full CRUD operations on CRM data including leads, campaigns, tasks, trainers, learners, courses, activities, notes, batches, emails, calls, meetings, and messages.
 
 The system uses **LangGraph** for orchestration, **OpenAI GPT-4** for natural language understanding, and **Supabase** for data storage and retrieval.
 
 ## ✨ Features
 
 ### Core Capabilities
-- **Multi-Source Data Access**: Seamlessly query CRM, LMS, RMS, and RAG data
+- **CRM Data Access**: Seamlessly query and manage CRM data with full CRUD operations
 - **Intelligent Intent Detection**: Automatically routes queries to the correct data source
 - **Conversation Memory**: Maintains context across conversation turns
 - **Session Management**: Anonymous and authenticated session support
@@ -74,7 +72,7 @@ The system uses **LangGraph** for orchestration, **OpenAI GPT-4** for natural la
     ┌────┴────┬──────────┬──────────┐
     ▼         ▼          ▼          ▼
 ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-│  CRM   │ │  LMS   │ │  RMS   │ │  RAG   │
+│  CRM   │
 │  Repo  │ │  Repo  │ │  Repo  │ │ Vector │
 └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
     │         │          │          │
@@ -92,8 +90,7 @@ The chatbot uses a state machine workflow with the following nodes:
 
 1. **validate_session**: Validates and initializes session
 2. **load_memory**: Loads conversation history
-3. **decide_source**: Determines data source (CRM/LMS/RMS/RAG/general)
-4. **fetch_crm/fetch_lms/fetch_rms/fetch_rag**: Retrieves data from respective sources
+3. **fetch_crm**: Retrieves CRM data
 5. **check_context**: Validates retrieved data
 6. **call_llm**: Formats response using OpenAI
 7. **save_memory**: Persists conversation to database
@@ -110,12 +107,9 @@ Session Validation
 Load Conversation History
     │
     ▼
-Intent Detection (Keyword/LLM)
+CRM Data Fetching
     │
-    ├─→ CRM ──→ Fetch CRM Data
-    ├─→ LMS ──→ Fetch LMS Data
-    ├─→ RMS ──→ Fetch RMS Data
-    └─→ RAG ──→ Vector Search
+    └─→ CRM ──→ Fetch CRM Data
     │
     ▼
 Validate Retrieved Context
@@ -151,9 +145,7 @@ service_chatbot/
 │   ├── db/
 │   │   ├── supabase.py         # Supabase client initialization
 │   │   ├── crm_repo.py         # CRM data repository
-│   │   ├── lms_repo.py         # LMS data repository
-│   │   ├── rms_repo.py         # RMS data repository
-│   │   ├── rag_repo.py         # RAG data repository
+│   │   ├── crm_repo.py         # CRM data repository
 │   │   ├── memory_repo.py      # Conversation memory
 │   │   ├── chat_history_repo.py # Chat history persistence
 │   │   ├── retrieved_context_repo.py # Context tracking
@@ -166,9 +158,7 @@ service_chatbot/
 │   │       ├── load_memory.py
 │   │       ├── decide_source.py
 │   │       ├── fetch_crm.py
-│   │       ├── fetch_lms.py
-│   │       ├── fetch_rms.py
-│   │       ├── fetch_rag.py
+│   │       ├── fetch_crm.py
 │   │       ├── check_context.py
 │   │       ├── call_llm.py
 │   │       ├── save_memory.py
@@ -176,10 +166,6 @@ service_chatbot/
 │   ├── llm/
 │   │   ├── openai_client.py    # OpenAI client wrapper
 │   │   └── formatter.py        # Response formatting
-│   ├── rag/
-│   │   ├── embedder.py         # Text embedding
-│   │   ├── ingestion.py        # Document ingestion
-│   │   └── vector_search.py    # Vector similarity search
 │   ├── services/
 │   │   ├── chat_service.py     # Chat orchestration service
 │   │   └── session_service.py # Session management service
@@ -360,9 +346,7 @@ START
 [decide_source]
   │
   ├─→ CRM → [fetch_crm]
-  ├─→ LMS → [fetch_lms]
-  ├─→ RMS → [fetch_rms]
-  ├─→ RAG → [fetch_rag]
+  └─→ CRM → [fetch_crm]
   └─→ General → [check_context]
       │
       ▼

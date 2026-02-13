@@ -4,13 +4,10 @@ from app.langgraph.state import AgentState
 # Import Nodes
 from app.langgraph.nodes.validate_session import validate_session_node
 from app.langgraph.nodes.load_memory import load_memory_node
-from app.langgraph.nodes.decide_source import decide_source_node
 from app.langgraph.nodes.fetch_crm import fetch_crm_node
-from app.langgraph.nodes.fetch_lms import fetch_lms_node
-from app.langgraph.nodes.fetch_rms import fetch_rms_node
-from app.langgraph.nodes.fetch_rag import fetch_rag_node
 from app.langgraph.nodes.check_context import check_context_node
 from app.langgraph.nodes.call_llm import call_llm_node
+from app.langgraph.nodes.execute_action import execute_action_node
 from app.langgraph.nodes.save_memory import save_memory_node
 
 workflow = StateGraph(AgentState)
@@ -18,14 +15,10 @@ workflow = StateGraph(AgentState)
 # Add Nodes
 workflow.add_node("validate_session", validate_session_node)
 workflow.add_node("load_memory", load_memory_node)
-workflow.add_node("decide_source", decide_source_node)
 workflow.add_node("fetch_crm", fetch_crm_node)
-workflow.add_node("fetch_lms", fetch_lms_node)
-workflow.add_node("fetch_rms", fetch_rms_node)
-workflow.add_node("fetch_rag", fetch_rag_node)
 workflow.add_node("check_context", check_context_node)
 workflow.add_node("call_llm", call_llm_node)
-# workflow.add_node("fallback", fallback_node)
+workflow.add_node("execute_action", execute_action_node)
 workflow.add_node("save_memory", save_memory_node)
 
 # Set Entry Point
@@ -46,45 +39,31 @@ workflow.add_conditional_edges(
     }
 )
 
-# Edge: Load Memory -> Decide Source
-workflow.add_edge("load_memory", "decide_source")
-
-# Edge: Decide Source -> Fetch ...
-def route_source(state: AgentState):
-    source = state.get("source_type", "general")
-    
-    # If response already set (e.g., greeting), skip to check_context
+# Edge: Load Memory -> Fetch CRM (or Check Context for greetings)
+def route_after_memory(state: AgentState):
+    """
+    Routes after loading memory.
+    - Greetings: Skip to check_context (which will return greeting response)
+    - All other queries: Route to fetch_crm
+    """
+    # If response already set (greeting handled in load_memory), route to check_context
     if state.get("response"):
         return "check_context"
     
-    if source == "crm":
-        return "fetch_crm"
-    elif source == "lms":
-        return "fetch_lms"
-    elif source == "rms":
-        return "fetch_rms"
-    elif source == "rag":
-        return "fetch_rag"
-    else:
-        return "check_context" # Direct to check_context (which handles general/none)
+    # All other queries route to CRM
+    return "fetch_crm"
 
 workflow.add_conditional_edges(
-    "decide_source",
-    route_source,
+    "load_memory",
+    route_after_memory,
     {
         "fetch_crm": "fetch_crm",
-        "fetch_lms": "fetch_lms",
-        "fetch_rms": "fetch_rms",
-        "fetch_rag": "fetch_rag",
         "check_context": "check_context"
     }
 )
 
-# Edges: Fetch -> Check Context
+# Edge: Fetch CRM -> Check Context
 workflow.add_edge("fetch_crm", "check_context")
-workflow.add_edge("fetch_lms", "check_context")
-workflow.add_edge("fetch_rms", "check_context")
-workflow.add_edge("fetch_rag", "check_context")
 
 # Edge: Check Context -> Call LLM or Save Memory (if empty/error)
 def route_after_check(state: AgentState):
@@ -101,8 +80,38 @@ workflow.add_conditional_edges(
     }
 )
 
-# Edge: Call LLM -> Save Memory
-workflow.add_edge("call_llm", "save_memory")
+# Edge: Call LLM -> Execute Action (if tool calls) or Save Memory (if response)
+def route_after_llm(state: AgentState):
+    # If response already exists, go to save_memory (action results formatted or regular response)
+    if state.get("response"):
+        return "save_memory"
+    
+    tool_calls = state.get("tool_calls")
+    requires_confirmation = state.get("requires_confirmation", False)
+    
+    # If confirmation required, go back to call_llm to get user confirmation
+    if requires_confirmation:
+        return "call_llm"
+    
+    # If tool calls exist and no response yet, execute them
+    if tool_calls and len(tool_calls) > 0:
+        return "execute_action"
+    
+    # Otherwise, save memory and end
+    return "save_memory"
+
+workflow.add_conditional_edges(
+    "call_llm",
+    route_after_llm,
+    {
+        "execute_action": "execute_action",
+        "call_llm": "call_llm",
+        "save_memory": "save_memory"
+    }
+)
+
+# Edge: Execute Action -> Call LLM (to format results)
+workflow.add_edge("execute_action", "call_llm")
 
 # Fallback node removed as it was unreachable
 # workflow.add_edge("fallback", "save_memory")
