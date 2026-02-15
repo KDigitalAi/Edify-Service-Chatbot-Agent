@@ -68,9 +68,18 @@ jobs:
             echo "No existing container found: $CONTAINER_NAME"
           fi
 
-      - name: Stop and remove containers with compose
+      - name: Set working directory
+        id: workdir
         run: |
-          cd $HOME/Edify-Service-Chatbot-Agent || cd ${{ github.workspace }}
+          # Use checked-out code directory (where compose files are)
+          WORK_DIR="${{ github.workspace }}"
+          echo "work_dir=$WORK_DIR" >> $GITHUB_OUTPUT
+          echo "Working directory: $WORK_DIR"
+          echo "Compose file exists: $([ -f "$WORK_DIR/docker-compose.prod.yml" ] && echo 'yes' || echo 'no')"
+
+      - name: Stop and remove containers with compose
+        working-directory: ${{ steps.workdir.outputs.work_dir }}
+        run: |
           docker compose \
             -f docker-compose.prod.yml \
             --env-file ${{ steps.env_file.outputs.env_file }} \
@@ -96,17 +105,19 @@ jobs:
           echo "Cleanup completed"
 
       - name: Build latest Docker image with compose
+        working-directory: ${{ steps.workdir.outputs.work_dir }}
         run: |
-          cd $HOME/Edify-Service-Chatbot-Agent || cd ${{ github.workspace }}
           echo "Building Docker image with compose for production..."
+          echo "Working directory: $(pwd)"
+          echo "Compose file: $(ls -la docker-compose.prod.yml)"
           docker compose \
             -f docker-compose.prod.yml \
             --env-file ${{ steps.env_file.outputs.env_file }} \
             build --no-cache
 
       - name: Run Docker container with compose
+        working-directory: ${{ steps.workdir.outputs.work_dir }}
         run: |
-          cd $HOME/Edify-Service-Chatbot-Agent || cd ${{ github.workspace }}
           echo "Starting containers with compose for production..."
           docker compose \
             -f docker-compose.prod.yml \
