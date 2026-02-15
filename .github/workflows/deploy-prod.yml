@@ -10,141 +10,46 @@ jobs:
   deploy:
     name: Deploy to Production Server
     runs-on: [self-hosted, Linux]
-    if: github.ref == 'refs/heads/main'
-    timeout-minutes: 30
-    
-    # Ensure we can use org-level runners
-    permissions:
-      contents: read
-      actions: read
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-          fetch-depth: 0
-      
-      - name: Pull latest code
+      - name: 🚀 Deploy Production Application
         run: |
-          echo "Pulling latest code from repository..."
+          echo "======================================"
+          echo "Starting Production Deployment"
+          echo "======================================"
+
+          # Go to production directory
+          cd /home/ubuntu/Edify-Service-Chatbot-Agent
+
+          echo "📥 Pulling latest code..."
           git fetch origin
-          git reset --hard origin/${{ github.ref_name }}
-          git clean -fd
-          echo "Current commit: $(git rev-parse HEAD)"
-          echo "Current branch: $(git branch --show-current)"
+          git reset --hard origin/main
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+          echo "🛑 Stopping existing containers..."
+          docker compose -f docker-compose.prod.yml down --remove-orphans
 
-      - name: Find .env file location
-        id: env_file
+          echo "🔨 Building Docker image..."
+          docker compose -f docker-compose.prod.yml build
+
+          echo "▶️ Starting containers..."
+          docker compose -f docker-compose.prod.yml up -d --force-recreate
+
+          echo "✅ Production deployment completed"
+
+      - name: 🔎 Verify Deployment
         run: |
-          echo "Searching for .env file..."
-          # Check home directory first (where it's actually located)
-          if [ -f "$HOME/Edify-Service-Chatbot-Agent/.env" ]; then
-            ENV_FILE="$HOME/Edify-Service-Chatbot-Agent/.env"
-            echo "Found .env at: $ENV_FILE"
-          elif [ -f "/opt/edify-chatbot/.env" ]; then
-            ENV_FILE="/opt/edify-chatbot/.env"
-            echo "Found .env at: $ENV_FILE"
-          elif [ -f "$HOME/edify-chatbot/.env" ]; then
-            ENV_FILE="$HOME/edify-chatbot/.env"
-            echo "Found .env at: $ENV_FILE"
-          else
-            ENV_FILE="$HOME/Edify-Service-Chatbot-Agent/.env"
-            echo "⚠️  Warning: .env file not found, will use: $ENV_FILE"
-          fi
-          echo "env_file=$ENV_FILE" >> $GITHUB_OUTPUT
-          echo "✅ Using .env file at: $ENV_FILE"
-
-      - name: Remove existing Docker container (if running)
-        run: |
-          CONTAINER_NAME=edify-chatbot-prod
-          if [ "$(docker ps -aq -f name=$CONTAINER_NAME)" ]; then
-            echo "Removing existing container: $CONTAINER_NAME"
-            docker rm -f $CONTAINER_NAME
-          else
-            echo "No existing container found: $CONTAINER_NAME"
-          fi
-
-      - name: Set working directory
-        id: workdir
-        run: |
-          # Use checked-out code directory (where compose files are)
-          WORK_DIR="${{ github.workspace }}"
-          echo "work_dir=$WORK_DIR" >> $GITHUB_OUTPUT
-          echo "Working directory: $WORK_DIR"
-          echo "Compose file exists: $([ -f "$WORK_DIR/docker-compose.prod.yml" ] && echo 'yes' || echo 'no')"
-
-      - name: Stop and remove containers with compose
-        working-directory: ${{ steps.workdir.outputs.work_dir }}
-        run: |
-          docker compose \
-            -f docker-compose.prod.yml \
-            --env-file ${{ steps.env_file.outputs.env_file }} \
-            down --remove-orphans || true
-
-      - name: Remove previous Docker images (if any)
-        run: |
-          IMAGE_NAME=edify-chatbot-prod:latest
-          if [ "$(docker images -q $IMAGE_NAME)" ]; then
-            echo "Removing previous image: $IMAGE_NAME"
-            docker rmi -f $IMAGE_NAME || true
-          else
-            echo "No existing image found: $IMAGE_NAME"
-          fi
-
-      - name: Clean old Docker resources
-        run: |
-          echo "Cleaning up old Docker resources..."
-          docker container prune -f || true
-          docker image prune -a -f || true
-          docker volume prune -f || true
-          docker builder prune -a -f || true
-          echo "Cleanup completed"
-
-      - name: Build latest Docker image with compose
-        working-directory: ${{ steps.workdir.outputs.work_dir }}
-        run: |
-          echo "Building Docker image with compose for production..."
-          echo "Working directory: $(pwd)"
-          echo "Compose file: $(ls -la docker-compose.prod.yml)"
-          docker compose \
-            -f docker-compose.prod.yml \
-            --env-file ${{ steps.env_file.outputs.env_file }} \
-            build --no-cache
-
-      - name: Run Docker container with compose
-        working-directory: ${{ steps.workdir.outputs.work_dir }}
-        run: |
-          echo "Starting containers with compose for production..."
-          docker compose \
-            -f docker-compose.prod.yml \
-            --env-file ${{ steps.env_file.outputs.env_file }} \
-            up -d --force-recreate --remove-orphans
-          echo "Production deployment completed successfully"
-
-      - name: Verify deployment
-        run: |
-          echo "Waiting for container to be healthy..."
+          echo "Waiting for container..."
           sleep 10
+
           if docker ps | grep -q edify-chatbot-prod; then
             echo "✅ Production container is running"
             docker ps | grep edify-chatbot-prod
-            echo ""
-            echo "Checking health endpoint on port 8081..."
-            sleep 5
-            curl -f http://localhost:8081/health || echo "⚠️  Health check endpoint not responding yet"
+
+            echo "Checking health endpoint..."
+            curl -f http://localhost:8081/health || echo "⚠️ Health endpoint not ready yet"
           else
             echo "❌ Container failed to start"
-            docker logs edify-chatbot-prod || true
+            docker logs edify-chatbot-prod
             exit 1
           fi
-          
-      - name: Show container logs
-        if: always()
-        run: |
-          echo "=== Production Container Logs ==="
-          docker logs edify-chatbot-prod --tail 50 || true
-
