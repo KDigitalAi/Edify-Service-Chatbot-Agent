@@ -56,17 +56,31 @@ jobs:
       - name: Find .env file location
         id: env_file
         run: |
-          if [ -f "/opt/edify-chatbot/.env" ]; then
+          echo "Searching for .env file..."
+          # Check home directory first (where it's actually located)
+          if [ -f "$HOME/Edify-Service-Chatbot-Agent/.env" ]; then
+            ENV_FILE="$HOME/Edify-Service-Chatbot-Agent/.env"
+            echo "Found .env at: $ENV_FILE"
+          elif [ -f "/opt/edify-chatbot/.env" ]; then
             ENV_FILE="/opt/edify-chatbot/.env"
-          elif [ -f "${{ steps.detect.outputs.app_path }}/.env" ]; then
-            ENV_FILE="${{ steps.detect.outputs.app_path }}/.env"
+            echo "Found .env at: $ENV_FILE"
           elif [ -f "$HOME/edify-chatbot/.env" ]; then
             ENV_FILE="$HOME/edify-chatbot/.env"
+            echo "Found .env at: $ENV_FILE"
+          elif [ -f "${{ steps.detect.outputs.app_path }}/.env" ]; then
+            ENV_FILE="${{ steps.detect.outputs.app_path }}/.env"
+            echo "Found .env at: $ENV_FILE"
           else
             ENV_FILE="${{ steps.detect.outputs.app_path }}/.env"
+            echo "⚠️  Warning: .env file not found, will use: $ENV_FILE"
+            echo "Checked locations:"
+            echo "  - $HOME/Edify-Service-Chatbot-Agent/.env"
+            echo "  - /opt/edify-chatbot/.env"
+            echo "  - $HOME/edify-chatbot/.env"
+            echo "  - ${{ steps.detect.outputs.app_path }}/.env"
           fi
           echo "env_file=$ENV_FILE" >> $GITHUB_OUTPUT
-          echo "Using .env file at: $ENV_FILE"
+          echo "✅ Using .env file at: $ENV_FILE"
 
       - name: Remove existing Docker container (if running)
         run: |
