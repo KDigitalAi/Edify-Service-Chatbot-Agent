@@ -61,9 +61,6 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
-    # Network configuration
-    networks:
-      - chatbot-network
     # Labels for organization and monitoring
     labels:
       - "com.edify.service=chatbot"
