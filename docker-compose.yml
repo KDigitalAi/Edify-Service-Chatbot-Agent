@@ -31,7 +31,7 @@ services:
       - .:/app
 
     # development command (keeps same start script)
-    command: ./start.sh
+    command: ["sh", "/app/start.sh"]
 
     # add a lightweight healthcheck the workflow can rely on
     healthcheck:

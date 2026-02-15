@@ -1,112 +1,46 @@
-version: '3.8'
-
 services:
   chatbot:
+    # prod-specific container name (different from dev)
+    container_name: edify-chatbot-prod
+
+    # build image for production; tag identifies it as prod
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        PORT: 8080
-    image: edify-chatbot:latest
-    container_name: edify-chatbot
+        # set default build arg if Dockerfile uses it (app will use env PORT at runtime)
+        PORT: ${PORT:-8080}
+
+    image: edify-chatbot:prod
     restart: unless-stopped
+
+    # map host 8081 -> container 8080 (container binds to 8080)
+    ports:
+      - "8081:8080"
+
+    # production should use env file for secrets/config
     env_file:
       - .env
+
+    # ensure app binds to container port 8080 at runtime
     environment:
       - PORT=8080
-      - PYTHONUNBUFFERED=1
-      - PYTHONDONTWRITEBYTECODE=1
-    # Port not exposed to host - Nginx will proxy
-    # ports:
-    #   - "8080:8080"
-    networks:
-      - chatbot-network
+
+    # In production we avoid mounting local code.
+    # If you need to mount logs/config, add volumes carefully here.
+    # volumes:
+    #   - /opt/edify/logs:/app/logs
+
+    command: ["sh", "/app/start.sh"]
+
+
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request, os; port=os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 60s
-    # Production resource limits (adjust based on your server capacity)
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1'
-          memory: 1G
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-    # Logging configuration with rotation
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
-        compress: "true"
-    # Security options
-    security_opt:
-      - no-new-privileges:true
-    # Read-only root filesystem (except for /tmp)
-    read_only: false
-    tmpfs:
-      - /tmp
-      - /var/tmp
-    # Capabilities drop for security
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE
-    # Labels for organization and monitoring
+
     labels:
       - "com.edify.service=chatbot"
+      - "com.edify.env=prod"
       - "com.edify.version=1.0.0"
-      - "com.edify.environment=production"
-      - "com.edify.description=Edify CRM Agentic AI Service"
-      - "traefik.enable=false"
-    # Graceful shutdown
-    stop_grace_period: 30s
-    # Prevent container from being recreated unnecessarily
-    init: true
-
-  # Optional: Redis service for caching (uncomment if using Redis caching)
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: edify-chatbot-redis
-  #   restart: unless-stopped
-  #   command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
-  #   volumes:
-  #     - redis-data:/data
-  #   networks:
-  #     - chatbot-network
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 3
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         cpus: '0.5'
-  #         memory: 256M
-  #       reservations:
-  #         cpus: '0.25'
-  #         memory: 128M
-
-networks:
-  chatbot-network:
-    driver: bridge
-    name: edify-chatbot-network
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
-
-# Optional: Redis volume (uncomment if using Redis)
-# volumes:
-#   redis-data:
-#     driver: local
-#     name: edify-chatbot-redis-data
