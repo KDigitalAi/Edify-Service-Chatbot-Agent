@@ -1,75 +1,83 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Deployment script for Edify Chatbot Agent
-# Usage: ./scripts/deploy.sh
-
-set -e  # Exit on error
-
-echo "🚀 Starting deployment..."
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Check if Docker is running
-if ! docker info > /dev/null 2>&1; then
-    echo -e "${RED}❌ Error: Docker is not running!${NC}"
-    exit 1
+# Usage:
+#  ./scripts/deploy.sh dev      -> uses docker-compose.yml with project edify_dev (port 8080)
+#  ./scripts/deploy.sh prod     -> uses docker-compose.prod.yml with project edify_prod (port 8081)
+#  ./scripts/deploy.sh dev -n   -> dry run (no up)
+#
+ENV=${1:-dev}
+DRY_RUN=false
+if [ "${2:-}" = "-n" ] || [ "${2:-}" = "--dry-run" ]; then
+  DRY_RUN=true
 fi
 
-# Update and get latest code
-echo -e "${YELLOW}📥 Pulling latest code from repository...${NC}"
-git pull || {
-    echo -e "${YELLOW}⚠️  Warning: git pull failed or not in a git repository. Continuing with current code...${NC}"
-}
+ROOT_DIR="$(dirname "$(readlink -f "$0")")/.."
+cd "$ROOT_DIR"
 
-# Check if .env file exists
+echo "Deploy script starting for environment: $ENV"
+echo "Working dir: $(pwd)"
+
+# check docker
+if ! docker info >/dev/null 2>&1; then
+  echo "ERROR: Docker not available. Exiting."
+  exit 1
+fi
+
+# verify .env
 if [ ! -f .env ]; then
-    echo -e "${RED}❌ Error: .env file not found!${NC}"
-    echo "Please create a .env file with all required environment variables."
-    exit 1
+  echo "ERROR: .env not found in $ROOT_DIR. Create it and try again."
+  exit 1
 fi
 
-# Stop existing containers
-echo -e "${YELLOW}📦 Stopping and removing existing containers...${NC}"
-docker-compose down 2>/dev/null || true
-
-# Build new image
-echo -e "${YELLOW}🔨 Building Docker image...${NC}"
-docker-compose build --no-cache
-
-# Start containers
-echo -e "${YELLOW}🚀 Starting containers...${NC}"
-docker-compose up -d
-
-# Wait for health check
-echo -e "${YELLOW}⏳ Waiting for application to be healthy...${NC}"
-sleep 10
-
-# Check health
-if curl -f http://localhost:8080/health > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Application is healthy!${NC}"
+# select compose file and project name
+if [ "$ENV" = "prod" ]; then
+  COMPOSE_FILE="docker-compose.prod.yml"
+  PROJECT="edify_prod"
+  HEALTH_URL="http://localhost:8081/health"
 else
-    echo -e "${RED}❌ Health check failed!${NC}"
-    echo "Checking logs..."
-    docker-compose logs --tail=50
-    exit 1
+  COMPOSE_FILE="docker-compose.yml"
+  PROJECT="edify_dev"
+  HEALTH_URL="http://localhost:8080/health"
 fi
 
-# Show status
-echo -e "${GREEN}✅ Deployment complete!${NC}"
-echo ""
-echo "Container status:"
-docker-compose ps
+echo "Using compose: $COMPOSE_FILE"
+echo "Project name: $PROJECT"
 
-echo ""
-echo "Application logs (last 20 lines):"
-docker-compose logs --tail=20
+# git pull latest for that branch
+if [ "$ENV" = "prod" ]; then
+  GIT_BRANCH="main"
+else
+  GIT_BRANCH="dev"
+fi
 
-echo ""
-echo -e "${GREEN}🎉 Deployment successful!${NC}"
-echo "Application should be available at: http://localhost:8080"
-echo "View logs with: docker-compose logs -f"
+echo "Fetching and resetting to origin/$GIT_BRANCH"
+git fetch origin
+git reset --hard "origin/$GIT_BRANCH"
 
+# stop only this project's containers (safe)
+echo "Stopping existing containers for project $PROJECT..."
+docker compose -f "$COMPOSE_FILE" -p "$PROJECT" down --remove-orphans || true
+
+# build & start
+if [ "$DRY_RUN" = true ]; then
+  echo "Dry run enabled; skipping build/up."
+  exit 0
+fi
+
+echo "Building images..."
+docker compose -f "$COMPOSE_FILE" -p "$PROJECT" build
+
+echo "Starting containers..."
+docker compose -f "$COMPOSE_FILE" -p "$PROJECT" up -d --force-recreate
+
+echo "Waiting for health endpoint: $HEALTH_URL"
+sleep 5
+if curl -f "$HEALTH_URL" >/dev/null 2>&1; then
+  echo "Application healthy at $HEALTH_URL"
+else
+  echo "Warning: Health check failed (may take longer to start). Showing last logs..."
+  docker compose -f "$COMPOSE_FILE" -p "$PROJECT" logs --tail 50
+fi
+
+echo "Deployment finished for $ENV (project $PROJECT)."
