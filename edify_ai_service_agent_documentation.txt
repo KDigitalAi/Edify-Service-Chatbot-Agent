@@ -1,0 +1,671 @@
+================================================================================
+EDIFY AI SERVICE AGENT - PRODUCTION TECHNICAL DOCUMENTATION
+Version 1.0.0
+================================================================================
+
+1. EXECUTIVE OVERVIEW
+================================================================================
+
+The Edify AI Service Agent is a production-grade CRM chatbot system designed to
+provide natural language access to Edify's customer relationship management data.
+The system enables sales administrators and CRM managers to query leads, manage
+follow-ups, generate email drafts, send emails, and perform CRUD operations
+through conversational interactions.
+
+Business Objective: Eliminate manual data lookup tasks and streamline email
+workflows for sales teams. The system reduces time spent on CRM navigation and
+email composition by providing instant access to customer data and automated
+email generation.
+
+Target Users: Sales administrators, CRM managers, and customer service
+representatives who require quick access to lead information and automated
+email workflows.
+
+System Boundaries: The system operates as a stateless API service that
+orchestrates data retrieval from Edify Supabase (read-only CRM access) and
+manages conversation state in Chatbot Supabase (sessions, memory, audit logs).
+The system does not handle user authentication directly but relies on session
+management.
+
+Design Philosophy: Modular architecture with clear separation between API layer,
+orchestration layer (LangGraph), service layer (business logic), and repository
+layer (data access). The system prioritizes maintainability, extensibility, and
+operational visibility through comprehensive logging and audit trails.
+
+2. SYSTEM ARCHITECTURE
+================================================================================
+
+The system follows a layered architecture pattern with clear separation of
+concerns. The FastAPI application serves as the HTTP entry point, handling
+request routing, session management, and response formatting. LangGraph
+orchestrates the workflow through a state machine pattern, enabling conditional
+routing based on intent detection and state transitions.
+
+Component Breakdown:
+- API Layer (FastAPI): Handles HTTP requests, session validation, rate limiting
+- Orchestration Layer (LangGraph): Manages workflow state and node routing
+- Service Layer: Contains business logic (ChatService, LeadSummaryService,
+  EmailDraftService, EmailSenderService, FollowUpService)
+- Repository Layer: Abstracts data access (CRMRepo, MemoryRepo, ChatHistoryRepo,
+  AuditRepo, RetrievedContextRepo)
+- LLM Integration: OpenAI GPT-4 for natural language understanding and formatting
+
+Architecture Flow:
+    HTTP Request
+         |
+         v
+    FastAPI Route (/chat/message)
+         |
+         v
+    ChatService.process_user_message()
+         |
+         v
+    LangGraph Workflow (graph.ainvoke)
+         |
+         v
+    Node Execution (validate_session -> load_memory -> route -> execute -> save)
+         |
+         v
+    Service Layer (business logic)
+         |
+         v
+    Repository Layer (database access)
+         |
+         v
+    Response Generation
+         |
+         v
+    HTTP Response
+
+FastAPI Integration: FastAPI routes delegate to ChatService which constructs
+initial AgentState and invokes the compiled LangGraph workflow. The graph
+returns updated state containing the response, which ChatService extracts and
+returns to the client.
+
+Service and Repository Separation: Services contain business logic and
+coordinate between multiple repositories. Repositories handle direct database
+interactions using Supabase clients. This separation enables testability and
+allows swapping data sources without changing business logic.
+
+3. REQUEST LIFECYCLE (END-TO-END FLOW)
+================================================================================
+
+Session Validation: validate_session_node queries admin_sessions table to verify
+session exists and status is "active". Invalid sessions return error response
+and route to save_memory for persistence. Session validation failures are logged
+to audit_logs table.
+
+Memory Loading: load_memory_node determines if conversation history is needed
+using _needs_history() function. History is skipped for greetings and simple
+list queries. When needed, MemoryRepo.get_chat_history() retrieves last 5
+conversation pairs from chat_history table. Contextual reference resolution
+occurs here if query contains patterns like "first one", "that lead".
+
+Intent Detection: decide_source_node uses keyword-based pattern matching to
+classify queries. Priority order: greeting -> send_email -> followup ->
+email_draft -> lead_summary -> crm. Detection uses regex patterns on normalized
+query text. No LLM fallback exists for intent detection.
+
+Graph Routing: route_after_memory function examines source_type from state and
+routes to appropriate node. Routes include fetch_followup_leads, send_email,
+generate_email_draft, fetch_lead_activity_summary, fetch_crm, check_context.
+Greetings bypass data retrieval and route directly to check_context.
+
+Node Execution: Specialized nodes execute business logic. fetch_crm_node queries
+CRMRepo.search_crm(). send_email_node calls EmailDraftService.send_email_to_lead().
+fetch_lead_activity_summary_node uses LeadSummaryService.get_lead_activity_summary().
+Each node persists retrieved_context to database via RetrievedContextRepo.
+
+Context Validation: check_context_node verifies retrieved_context contains data.
+Empty contexts trigger "no data found" response and event logging. Greetings
+and pre-formatted responses bypass context validation.
+
+Response Generation: call_llm_node formats responses using OpenAI GPT-4 when
+context exists. ResponseFormatter handles structured data formatting. Pre-formatted
+responses from specialized nodes bypass LLM formatting.
+
+Memory Persistence: save_memory_node persists conversation pair to chat_history
+table via ChatHistoryRepo.save_chat_history(). Entity memory and pending actions
+are saved to retrieved_context table with special source_type values.
+
+Error Fallback: Exceptions at any node are caught and logged to audit_logs.
+User-facing error messages are returned. Critical errors trigger HTTP 500
+responses with error details logged.
+
+4. LANGGRAPH ORCHESTRATION DESIGN
+================================================================================
+
+State Structure: AgentState TypedDict contains session_id, admin_id, user_message,
+conversation_history, retrieved_context, source_type, response, tool_calls,
+action_results, requires_confirmation, pending_action. State is immutable between
+nodes - nodes return dictionaries that are merged into state.
+
+Node Responsibilities: Each node has single responsibility. validate_session_node
+validates sessions. load_memory_node loads history and detects intent.
+decide_source_node classifies queries. Specialized nodes (fetch_crm, send_email,
+etc.) execute business logic. call_llm_node formats responses. execute_action_node
+executes tool calls. save_memory_node persists conversations.
+
+Routing Logic: Conditional edges use functions that examine state and return
+target node names. route_after_validation checks for error responses.
+route_after_memory routes based on source_type. route_after_check routes based
+on context existence. route_after_llm routes based on tool_calls presence.
+
+Conditional Edges: Graph uses add_conditional_edges() for dynamic routing.
+validate_session routes to save_memory (error) or load_memory (success).
+load_memory routes to specialized nodes based on source_type. check_context
+routes to call_llm (data exists) or save_memory (no data). call_llm routes to
+execute_action (tool calls) or save_memory (response ready).
+
+Source Type Mechanism: source_type is set by decide_source_node and determines
+routing. Values include "none" (greeting), "send_email", "followup", "email_draft",
+"lead_summary", "crm". Contextual resolution in load_memory_node can override
+source_type to "lead_summary" when resolving references like "first one".
+
+Memory Affects Routing: Conversation history enables contextual reference
+resolution. Entity memory enables auto-filling missing IDs in tool calls.
+Pending action memory enables confirmation flows across requests. Memory is
+loaded in load_memory_node and injected into state.
+
+Failure Handling: Node exceptions are caught and logged. Error responses are
+set in state and routed to save_memory. Graph execution never crashes - all
+errors result in user-facing messages. Critical failures are logged to audit_logs.
+
+Why LangGraph: LangGraph provides stateful workflow orchestration with
+conditional routing, which is essential for handling diverse query types and
+maintaining conversation context. The graph pattern enables clear separation
+of concerns and makes the workflow visually understandable.
+
+5. INTENT DETECTION ENGINE
+================================================================================
+
+Keyword Detection System: detect_intent_keywords() uses regex patterns on
+normalized query text. Normalization includes lowercase conversion, punctuation
+removal, and plural/singular normalization. Patterns match against comprehensive
+keyword lists for each intent type.
+
+Priority Order: Detection follows strict priority: greeting -> send_email ->
+followup -> email_draft -> lead_summary -> crm. Higher priority intents are
+checked first. Once matched, lower priority checks are skipped. This ensures
+actions (send_email) take precedence over queries (followup).
+
+Send Email Detection: detect_send_email_intent() looks for explicit "send"
+keywords combined with "email" or "mail". Patterns include "send email", "send
+mail", "email now", "dispatch email". Must contain both send and email keywords.
+Excludes draft-only queries.
+
+Follow-up Detection: detect_followup_intent() matches "follow up", "follow-up",
+"pending lead", "lead to call", "requiring follow", "reminder". Excludes queries
+containing "send" keyword to avoid confusion with email sending.
+
+Lead Summary Detection: detect_lead_summary_intent() requires both summary
+keywords ("summary", "full summary", "activity summary") AND lead terms ("lead",
+"prospect", "customer"). Also matches patterns like "history of lead X" or
+"full summary of lead Y".
+
+CRM Fallback: All queries default to "crm" if no specific intent matches.
+CRM keywords include "lead", "trainer", "learner", "campaign", "task", "activity",
+"note", "course". Comprehensive keyword list ensures most CRM queries are
+correctly classified.
+
+Known Edge Cases: Ambiguous queries with multiple intent keywords may be
+misclassified. Unusual phrasing may not match patterns. No LLM fallback exists
+for edge cases. Greeting detection is strict and may miss variations.
+
+Limitations: Intent detection is entirely keyword-based with no semantic
+understanding. Complex queries may require multiple attempts. No learning or
+adaptation mechanism exists. Edge cases require manual pattern updates.
+
+6. MEMORY ARCHITECTURE
+================================================================================
+
+Conversation Memory: Stored in chat_history table as user_message and
+assistant_response pairs. MemoryRepo.get_chat_history() retrieves last N pairs
+and converts to LangGraph format (role + content). History is loaded when
+_needs_history() returns true (follow-up questions, contextual references).
+
+Entity Memory: Tracks last created/updated/deleted entity across requests.
+Stored in retrieved_context table with source_type="entity_memory". Contains
+entity_type, entity_id, entity_name, action. Loaded in load_memory_node and
+injected into state as last_entity_type, last_entity_id, last_entity_name.
+Used for auto-filling missing IDs in tool calls.
+
+Pending Action Memory: Stores destructive actions requiring confirmation.
+Stored in retrieved_context table with source_type="pending_action". Contains
+tool_name, arguments, entity_type, entity_id. Loaded in load_memory_node and
+injected as pending_action and requires_confirmation flags. Enables confirmation
+flows across multiple requests.
+
+Memory Storage: Conversation pairs saved via ChatHistoryRepo.save_chat_history()
+after each response. Entity memory saved via MemoryRepo.save_entity_memory()
+after CRUD operations. Pending actions saved via MemoryRepo.save_pending_action()
+when destructive action detected.
+
+Memory Retrieval: Conversation history retrieved via MemoryRepo.get_chat_history()
+with limit parameter (default 5). Entity memory retrieved via
+MemoryRepo.get_entity_memory() for most recent entity. Pending action retrieved
+via MemoryRepo.get_pending_action() for most recent pending action.
+
+Context Resolution Logic: _resolve_contextual_reference() detects patterns like
+"first one", "last one", "that lead" in queries. Extracts lead list from previous
+assistant response using _extract_lead_list_from_response(). Resolves reference
+to specific lead identifier (prefers ID over name). Sets lead_identifier in
+state for downstream nodes.
+
+Current Limitations: Context resolution requires previous response to contain
+numbered list format. Fails if response format is unexpected. Resolution only
+works for lead references, not other entities. No resolution for complex
+references like "the one we discussed yesterday".
+
+7. CRM INTEGRATION LAYER
+================================================================================
+
+ReadService Responsibilities: CRMRepo provides read operations via search_crm()
+method. Method accepts query string, detects target table from keywords, applies
+date filters, performs text search across configured fields, returns paginated
+results. No write operations in read path.
+
+CRUD Services: CRMRepo provides create_lead(), update_lead(), delete_lead(),
+and similar methods for all CRM tables. Methods validate inputs, construct
+Supabase queries, execute operations, return results. ToolRegistry maps these
+methods to OpenAI function schemas for LLM tool calling.
+
+Table Access Strategy: TABLE_CONFIGS dictionary maps table names to
+configurations including search_fields, date_field, order_field. Table detection
+uses keyword matching against table names and entity types. Supports 15+ tables
+including leads, campaigns, tasks, trainers, learners, Course, activity, notes,
+batches, emails, calls, meetings.
+
+Entity Extraction Logic: _extract_lead_identifier() in LeadSummaryService uses
+regex patterns to extract lead ID or name from queries. Prioritizes ID extraction
+over name. Handles formats like "lead ID 123", "lead name 'guna'", "lead 132".
+Cleans identifiers by stripping quotes and whitespace.
+
+Lead Resolution Process: _find_lead_by_id() queries leads table with exact ID
+match. _find_lead_by_name() uses ILIKE for case-insensitive partial matching.
+ID resolution takes priority. Both methods handle cleaned identifiers and return
+lead dictionaries or None.
+
+Query Construction: search_crm() builds Supabase PostgREST queries dynamically.
+Applies .select() with explicit column lists, .ilike() for text search,
+.eq()/.gte()/.lte() for date filters, .order() for sorting, .limit()/.range()
+for pagination. Queries are constructed based on detected table and filters.
+
+Data Consistency Handling: All queries use service_role key to bypass RLS
+policies. Read operations use Edify Supabase client (read-only access).
+Write operations also use Edify Supabase client but with service_role for
+full access. No transaction management - each operation is independent.
+
+Error Handling: Database errors are caught and logged. Invalid queries return
+empty results. Missing tables or columns trigger exceptions that are caught
+and logged to audit_logs. User-facing messages indicate data retrieval failures.
+
+8. EMAIL SYSTEM DESIGN
+================================================================================
+
+Email Draft Generation: EmailDraftService.generate_email_draft() fetches lead
+information via LeadSummaryService, retrieves latest interaction (call, email,
+meeting, note), determines template type based on context, generates draft using
+GPT-4 with lead context and template instructions, returns formatted draft with
+subject and body.
+
+Template Selection Logic: _determine_template_type() analyzes lead status,
+opportunity status, latest interaction type, and time since last interaction.
+Returns "follow_up" (after calls), "proposal" (visiting status), "re_engagement"
+(no recent interaction), "meeting_confirmation" (scheduled meeting),
+"objection_handling" (price/objection keywords detected).
+
+SMTP Integration: EmailSenderService uses Python smtplib with TLS encryption.
+Connects to configured SMTP server (default smtp.gmail.com:587), authenticates
+with SMTP_USERNAME and SMTP_PASSWORD, creates EmailMessage with From/To/Subject/Body,
+sends via server.send_message(). Timeout set to 30 seconds.
+
+Environment Variables Required: SMTP_HOST (smtp server hostname), SMTP_PORT (587
+for TLS), SMTP_USERNAME (sender email), SMTP_PASSWORD (app password for Gmail),
+SMTP_USE_TLS (true/false), EMAIL_FROM_NAME (sender display name). All loaded
+from .env file via Settings class.
+
+Email Node Flow: send_email_node extracts lead_identifier from state or query,
+extracts email content (subject/body) from state or conversation history, calls
+EmailDraftService.send_email_to_lead() or send_template_email_to_lead(),
+handles LeadNotFoundError exceptions, formats success/error response, persists
+context to retrieved_context table.
+
+Error Handling Strategy: SMTP errors (authentication, connection, timeout) are
+caught and logged. Invalid email addresses are validated before sending.
+LeadNotFoundError triggers user-friendly message. All errors are persisted to
+retrieved_context with error_message field. User receives clear error messages.
+
+Security Considerations: SMTP credentials stored in environment variables, never
+in code. Gmail requires app password instead of regular password. TLS encryption
+enforced for all connections. Email addresses validated before sending. No
+sensitive data logged in email content.
+
+9. DATABASE DESIGN OVERVIEW
+================================================================================
+
+Core Tables Used: admin_sessions (session management), chat_history (conversation
+pairs), retrieved_context (data retrieval tracking, entity memory, pending actions),
+audit_logs (action logging). All in Chatbot Supabase. Edify Supabase contains
+CRM tables (leads, campaigns, tasks, etc.) accessed read-only.
+
+Relationships: admin_sessions.session_id is foreign key in chat_history,
+retrieved_context, audit_logs. Cascade deletes ensure session deletion removes
+related records. admin_id links sessions to users (UUID format).
+
+Important Fields: admin_sessions: session_id (UUID primary key), admin_id (UUID),
+status (active/ended/expired), last_activity (timestamp). chat_history:
+user_message, assistant_response, source_type, response_time_ms. retrieved_context:
+source_type, query_text, payload (JSONB), error_message. audit_logs: action,
+metadata (JSONB).
+
+Foreign Key Handling: All foreign keys use ON DELETE CASCADE for chat_history
+and retrieved_context. audit_logs uses ON DELETE SET NULL to preserve audit
+trail even if session deleted. Indexes created on foreign key columns for
+query performance.
+
+Vector Usage: No vector databases or embeddings used. System relies on keyword
+matching and LLM for semantic understanding. No RAG implementation exists.
+
+Query Strategy: Read operations use Supabase PostgREST API with .select(),
+.filter(), .order(), .limit() methods. Write operations use .insert(), .update(),
+.delete() methods. All queries use service_role key to bypass RLS policies.
+Connection pooling handled by httpx (used by Supabase client).
+
+Read-only vs Write Operations: Edify Supabase accessed read-only for CRM data
+queries. Chatbot Supabase used for read/write operations (sessions, memory,
+audit logs). Service role keys provide full access to both instances.
+
+10. SECURITY MODEL
+================================================================================
+
+Admin Authentication: Session-based authentication using UUID session IDs.
+Sessions created via SessionService.create_session() with admin_id (can be
+anonymous UUID). Session validation occurs on every request via validate_session_node.
+No token-based authentication - sessions are stateless from client perspective.
+
+Token Validation: No JWT or API tokens used. Session validation queries
+admin_sessions table to verify session exists and status is "active". Invalid
+sessions return error responses. No token expiration mechanism - sessions
+remain active until explicitly ended.
+
+Rate Limiting: Optional rate limiting via slowapi (disabled by default).
+When enabled, applies to /chat endpoints only using limiter from app.state.
+Default limits: 10 requests/minute, 100 requests/hour per IP address.
+Health routes excluded from rate limiting. Rate limiting uses get_remote_address()
+for IP-based limiting.
+
+Supabase Service Role Usage: Both Supabase instances use service_role keys
+stored in environment variables. Keys provide full database access bypassing
+RLS policies. Keys never exposed to clients - only used in backend code.
+Service role keys are long-lived and should be rotated periodically.
+
+Email Credential Handling: SMTP credentials stored in environment variables
+(.env file). Never hardcoded or logged. Gmail requires app password (not regular
+password). Credentials validated on EmailSenderService initialization.
+
+Risk Assessment: Service role keys provide full database access - compromise
+would allow data access and modification. SMTP credentials allow email sending
+from configured account. Session validation is basic - no encryption or
+signature verification. Rate limiting is optional and may not prevent abuse.
+
+11. LOGGING AND OBSERVABILITY
+================================================================================
+
+Logging Strategy: Python logging module with StreamHandler to stdout.
+Log level configured via LOG_LEVEL environment variable (default INFO).
+Format: timestamp | level | logger_name | message. Structured logging via
+logger.info(), logger.warning(), logger.error() with context data.
+
+Debug Logging: DEBUG level logs include query details, extracted identifiers,
+routing decisions, memory loading, context resolution. Enabled via LOG_LEVEL=DEBUG.
+Debug logs help troubleshoot intent detection, memory loading, contextual
+resolution issues.
+
+Error Tracing: Exceptions logged with exc_info=True for full stack traces.
+Error context includes session_id, admin_id, query text, extracted identifiers.
+Errors logged at ERROR level with descriptive messages. Critical errors also
+logged to audit_logs table.
+
+Context Tracking: RetrievedContextRepo saves all data retrieval operations to
+retrieved_context table. Includes query_text, payload (JSONB), record_count,
+retrieval_time_ms, error_message. Enables analysis of query patterns, response
+times, error rates. Entity memory and pending actions also tracked.
+
+Operational Visibility: AuditRepo logs all actions to audit_logs table including
+user_message_received, chat_completed, tool_call_executed, session_validation_error.
+Metadata stored as JSONB for flexible querying. Enables compliance and debugging.
+
+12. API LAYER
+================================================================================
+
+Available Endpoints: POST /chat/message (send chat message, returns response),
+GET /chat/history/{session_id} (retrieve conversation history), POST /session/start
+(start session with admin_id), POST /session/start-anonymous (start anonymous
+session), POST /session/end (end session), GET /health (health check).
+
+Request Structure: /chat/message accepts ChatRequest with message (string) and
+session_id (UUID string). /chat/history accepts session_id path parameter and
+optional limit query parameter (1-200, default 50). Session endpoints accept
+JSON body with admin_id (optional).
+
+Response Structure: /chat/message returns ChatResponse with response (string) and
+session_id (UUID string). /chat/history returns ChatHistoryResponse with
+session_id, count, and history array. Health check returns JSON with status
+and service name.
+
+Session Handling: Sessions created automatically if session_id not found.
+get_or_create_session() queries admin_sessions table, creates new session if
+missing or inactive. Anonymous sessions use admin_id="00000000-0000-0000-0000-
+000000000000". Session validation occurs in validate_session_node.
+
+Health Checks: GET /health returns {"status": "ok", "service": "Edify Admin AI
+Service Agent"}. No database or external service checks performed. Simple
+endpoint to verify service is running.
+
+13. ERROR HANDLING STRATEGY
+================================================================================
+
+Node-level Errors: Each node wraps logic in try/except blocks. Exceptions caught,
+logged with context, and user-friendly error messages returned in state.
+Exceptions never propagate to crash the graph. All errors result in responses.
+
+Service-level Errors: Services catch exceptions and raise custom exceptions
+(LeadNotFoundError) or return error dictionaries. ChatService catches all
+exceptions and logs to audit_logs before re-raising. Service errors trigger
+HTTP 500 responses with error details.
+
+Database Errors: Supabase API errors (connection, query, constraint violations)
+caught and logged. Invalid queries return empty results. Foreign key violations
+logged to audit_logs. Database errors result in "I couldn't find any data"
+or "System error" messages.
+
+Email Errors: SMTP errors (authentication, connection, timeout, recipient refusal)
+caught by EmailSenderService and returned as error dictionaries. LeadNotFoundError
+raised when lead not found. Email errors result in "Failed to send email" messages
+with error details.
+
+User-facing Fallback Responses: All errors result in user-friendly messages.
+Generic errors: "I encountered an error. Please try again." Data errors: "I
+couldn't find any data matching your request." Email errors: "Failed to send
+email. Reason: [error]". No technical details exposed to users.
+
+14. PERFORMANCE CONSIDERATIONS
+================================================================================
+
+Database Access Efficiency: Connection pooling handled by httpx (used by Supabase
+client). Optional ENABLE_CONNECTION_POOLING setting configures pool size.
+Queries use indexes on foreign keys and common filter columns. Read-through
+caching available via Redis (disabled by default).
+
+Memory Loading Optimization: History loading skipped for greetings and simple
+list queries via _needs_history() function. Only loads last 5 conversation pairs
+by default. Caching available for chat history (2-minute TTL) when ENABLE_CACHING=true.
+Entity memory and pending actions loaded only when needed.
+
+Routing Efficiency: Intent detection uses regex patterns - fast and deterministic.
+No LLM calls for routing decisions. Conditional edges in graph are O(1) lookups.
+Routing decisions made in load_memory_node before specialized node execution.
+
+SMTP Overhead: Email sending adds 1-3 seconds latency due to SMTP connection and
+authentication. Timeout set to 30 seconds. Email sending is synchronous and blocks
+request. No async email queue implemented.
+
+Scalability Considerations: Stateless API design enables horizontal scaling.
+Session state stored in database, not memory. LangGraph state is request-scoped.
+Database connections pooled. Optional async DB operations via ENABLE_ASYNC_DB
+moves blocking operations to thread pool. Background task support for context
+saving via ENABLE_ASYNC_WRITES.
+
+15. KNOWN LIMITATIONS
+================================================================================
+
+Contextual Follow-up Gaps: Contextual references ("first one", "that lead")
+require previous assistant response to contain numbered list format. Resolution
+fails if response format is unexpected or if no previous response exists.
+Only works for lead references, not other entities.
+
+Intent Keyword Dependency: Intent detection relies entirely on keyword matching.
+Unusual phrasing may not match patterns. No LLM fallback for intent detection.
+Edge cases require manual pattern updates. Complex queries may be misclassified.
+
+Name Resolution Issues: Lead name extraction may fail for complex queries with
+multiple keywords or ambiguous phrasing. ID extraction takes priority, which can
+cause issues when both ID and name present. Case-insensitive matching may return
+multiple results - only first result used.
+
+Edge-case Routing Risks: Queries matching multiple intent patterns may route
+incorrectly due to priority order. Greeting detection is strict and may miss
+variations. CRM fallback may catch non-CRM queries if no specific intent matches.
+
+Improvement Areas: Add LLM fallback for intent detection edge cases. Improve
+contextual resolution to handle more reference types. Add semantic understanding
+for name extraction. Implement query classification learning from user feedback.
+Add support for multi-entity contextual references.
+
+16. DEPLOYMENT AND ENVIRONMENT SETUP
+================================================================================
+
+Required .env Variables: OPENAI_API_KEY (OpenAI API key), EDIFY_SUPABASE_URL
+(Edify Supabase project URL), EDIFY_SUPABASE_SERVICE_ROLE_KEY (Edify service
+role key), CHATBOT_SUPABASE_URL (Chatbot Supabase project URL),
+CHATBOT_SUPABASE_SERVICE_ROLE_KEY (Chatbot service role key), ENV (local/staging/
+production), LOG_LEVEL (INFO/DEBUG/WARNING/ERROR).
+
+SMTP Configuration: SMTP_HOST (smtp server hostname, default smtp.gmail.com),
+SMTP_PORT (587 for TLS), SMTP_USERNAME (sender email), SMTP_PASSWORD (app password
+for Gmail), SMTP_USE_TLS (true/false), EMAIL_FROM_NAME (sender display name).
+Gmail requires app password instead of regular password.
+
+Supabase Configuration: Run schema.sql in Chatbot Supabase SQL Editor to create
+tables (admin_sessions, chat_history, retrieved_context, audit_logs). Ensure
+Edify Supabase has read access to CRM tables. Service role keys must have
+appropriate permissions. Both instances should be in same region for performance.
+
+Running Locally: Install Python 3.11+, create virtual environment, install
+dependencies from requirements.txt, create .env file with required variables,
+run database migrations, start server with uvicorn app.main:app --reload.
+Service available at http://localhost:8000. API docs at /docs endpoint.
+
+Production Considerations: Use production-grade ASGI server (uvicorn with
+workers). Enable rate limiting for abuse prevention. Configure proper logging
+aggregation. Set up monitoring for error rates and response times. Rotate service
+role keys periodically. Use environment-specific .env files. Configure CORS
+properly for production domains.
+
+17. FOLDER STRUCTURE EXPLANATION
+================================================================================
+
+app/main.py: FastAPI application entry point, middleware configuration, route
+registration. app/api/routes/: API endpoint definitions (chat.py, session.py,
+health.py). app/api/dependencies.py: API dependencies and utilities.
+
+app/langgraph/: Orchestration layer. graph.py defines workflow and routing.
+state.py defines AgentState TypedDict. nodes/ contains all workflow nodes
+(validate_session, load_memory, decide_source, fetch_crm, send_email, etc.).
+
+app/services/: Business logic layer. ChatService orchestrates chat flow.
+LeadSummaryService handles lead activity summaries. EmailDraftService generates
+email drafts. EmailSenderService sends emails via SMTP. FollowUpService manages
+follow-up leads. ToolRegistry maps CRUD operations to LLM function schemas.
+
+app/db/: Repository layer. supabase.py initializes Supabase clients.
+crm_repo.py handles CRM data access. memory_repo.py handles conversation memory.
+chat_history_repo.py persists conversation pairs. audit_repo.py logs actions.
+retrieved_context_repo.py tracks data retrievals.
+
+app/core/: Core configuration and utilities. config.py loads environment
+variables into Settings class. logging.py configures Python logging.
+security.py contains security utilities. constants.py defines constants.
+
+app/llm/: LLM integration. openai_client.py wraps OpenAI API. formatter.py
+formats responses from structured data.
+
+Separation of Concerns: API layer handles HTTP, orchestration layer manages
+workflow, service layer contains business logic, repository layer handles data
+access. Clear boundaries enable testability and maintainability.
+
+18. SYSTEM STRENGTHS
+================================================================================
+
+Architectural Strengths: Clear separation of concerns with layered architecture.
+Modular design enables independent testing and modification. LangGraph provides
+visual workflow understanding. State machine pattern ensures predictable execution.
+
+Maintainability: Well-organized folder structure with clear responsibilities.
+Comprehensive logging and audit trails enable debugging. Error handling is
+consistent across layers. Code follows single responsibility principle.
+
+Extensibility: New intents can be added by updating decide_source_node patterns.
+New nodes can be added to graph without modifying existing nodes. New services
+can be added without changing orchestration layer. ToolRegistry enables adding
+new CRUD operations easily.
+
+Modularity: Each component has single responsibility. Services are independent
+and can be tested in isolation. Repositories abstract data access enabling
+data source swaps. Nodes are stateless and can be composed in different ways.
+
+19. SYSTEM WEAKNESSES
+================================================================================
+
+Fragile Areas: Intent detection relies entirely on keyword matching - no
+semantic understanding. Contextual resolution requires specific response formats.
+Name extraction may fail for ambiguous queries. No learning or adaptation mechanism.
+
+Risk Zones: Service role keys provide full database access - compromise would
+be critical. SMTP credentials in environment variables - proper secret management
+needed. Session validation is basic - no encryption or signature verification.
+Rate limiting is optional and may not prevent abuse.
+
+Improvements Needed: Add LLM fallback for intent detection edge cases. Improve
+contextual resolution to handle more reference types. Implement query classification
+learning. Add support for multi-entity contextual references. Enhance error
+messages with actionable guidance. Add request timeout handling at API level.
+
+20. FINAL ARCHITECTURE ASSESSMENT
+================================================================================
+
+System Maturity Level: Intermediate to Advanced. Core functionality is stable
+and production-ready. Edge cases and error handling are well-implemented.
+Logging and observability are comprehensive. However, intent detection and
+contextual resolution have limitations that require improvement.
+
+Production Readiness Rating: 7/10. System is production-ready for core use cases
+but has limitations in edge case handling. Intent detection may misclassify
+unusual queries. Contextual resolution works only for specific scenarios.
+Error handling is robust but could provide better user guidance.
+
+Scalability Rating: 8/10. Stateless design enables horizontal scaling. Database
+connections are pooled. Optional async operations reduce blocking. However,
+SMTP operations are synchronous and may become bottleneck. No async email queue.
+Memory loading could be optimized further with better caching strategies.
+
+Maintainability Rating: 9/10. Clear architecture with separation of concerns.
+Comprehensive logging enables debugging. Well-organized code structure.
+Documentation exists but could be more detailed. Test coverage could be improved.
+Code follows best practices with consistent error handling.
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================
+

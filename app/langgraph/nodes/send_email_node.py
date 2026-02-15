@@ -78,11 +78,17 @@ async def send_email_node(state: AgentState) -> Dict[str, Any]:
         # Initialize service
         service = EmailDraftService()
         
-        # Extract lead identifier from query using the proven LeadSummaryService extraction logic
-        # This ensures consistent behavior with lead summary and email draft features
-        logger.info(f"[SEND_EMAIL] STEP 1: Extracting lead identifier from query: '{user_message}'")
-        lead_identifier = service.lead_summary_service._extract_lead_identifier(user_message)
-        logger.info(f"[SEND_EMAIL] STEP 1 RESULT: Extracted identifier: '{lead_identifier}' (type: {type(lead_identifier)})")
+        # Check if lead_identifier was set by load_memory_node (contextual resolution)
+        lead_identifier = state.get("lead_identifier")
+        
+        if not lead_identifier:
+            # Extract lead identifier from query using the proven LeadSummaryService extraction logic
+            # This ensures consistent behavior with lead summary and email draft features
+            logger.info(f"[SEND_EMAIL] STEP 1: Extracting lead identifier from query: '{user_message}'")
+            lead_identifier = service.lead_summary_service._extract_lead_identifier(user_message)
+            logger.info(f"[SEND_EMAIL] STEP 1 RESULT: Extracted identifier: '{lead_identifier}' (type: {type(lead_identifier)})")
+        else:
+            logger.info(f"[SEND_EMAIL] STEP 1: Using lead identifier from state (contextual resolution): '{lead_identifier}'")
         
         if not lead_identifier:
             # Try to extract from previous context

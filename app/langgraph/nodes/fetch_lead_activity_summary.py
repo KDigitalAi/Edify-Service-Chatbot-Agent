@@ -39,8 +39,15 @@ async def fetch_lead_activity_summary_node(state: AgentState) -> Dict[str, Any]:
         # Initialize service
         service = LeadSummaryService()
         
-        # Extract lead identifier from query
-        lead_identifier = service._extract_lead_identifier(user_message)
+        # Check if lead_identifier was set by load_memory_node (contextual resolution)
+        lead_identifier = state.get("lead_identifier")
+        
+        if not lead_identifier:
+            # Extract lead identifier from query
+            lead_identifier = service._extract_lead_identifier(user_message)
+            logger.info(f"[LEAD_SUMMARY] Extracted lead identifier from query: '{lead_identifier}'")
+        else:
+            logger.info(f"[LEAD_SUMMARY] Using lead identifier from state (contextual resolution): '{lead_identifier}'")
         
         if not lead_identifier:
             logger.warning(f"[LEAD_SUMMARY] Could not extract lead identifier from query: {user_message}")
@@ -50,7 +57,7 @@ async def fetch_lead_activity_summary_node(state: AgentState) -> Dict[str, Any]:
                 "response": "I couldn't identify which lead you're asking about. Please specify the lead name or ID, for example: 'Give me full summary of lead John Doe' or 'Show activity summary for lead ID 132'."
             }
         
-        logger.info(f"[LEAD_SUMMARY] Extracted lead identifier: '{lead_identifier}' from query: '{user_message}'")
+        logger.info(f"[LEAD_SUMMARY] Using lead identifier: '{lead_identifier}' for query: '{user_message}'")
         
         # Fetch lead activity summary
         if settings.ENABLE_ASYNC_DB:
