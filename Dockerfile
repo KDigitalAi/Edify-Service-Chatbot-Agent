@@ -31,14 +31,15 @@ RUN useradd -m appuser && chown -R appuser:appuser /app
 
 USER appuser
 
-# Default port
-ENV PORT=8080
+# Build argument for port (defaults to 8080 for dev, 8081 for prod)
+ARG PORT=8080
+ENV PORT=${PORT}
 
-EXPOSE 8080
+EXPOSE ${PORT}
 
-# Healthcheck
+# Healthcheck (uses PORT env variable, defaults to 8080)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
+  CMD sh -c 'port=$${PORT:-8080} && curl -f http://localhost:$$port/health || exit 1'
 
 # Start application
 CMD ["./start.sh"]

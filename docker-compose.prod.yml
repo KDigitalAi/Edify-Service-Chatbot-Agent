@@ -6,23 +6,23 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        PORT: 8080
-    image: edify-chatbot:latest
-    container_name: edify-chatbot
+        PORT: 8081
+    image: edify-chatbot-prod:latest
+    container_name: edify-chatbot-prod
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      - PORT=8080
+      - PORT=8081
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
-    # Port not exposed to host - Nginx will proxy
-    # ports:
-    #   - "8080:8080"
+    # Production port exposed to host
+    ports:
+      - "8081:8081"
     networks:
       - chatbot-network
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request, os; port=os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)"]
+      test: ["CMD", "python", "-c", "import urllib.request, os; port=os.getenv('PORT', '8081'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
