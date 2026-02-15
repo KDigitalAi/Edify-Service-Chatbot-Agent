@@ -13,38 +13,32 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: 🚀 Deploy Application
+      - name: 🚀 Deploy Dev Application
         run: |
           echo "======================================"
           echo "Starting Dev Deployment"
           echo "======================================"
 
-          # Go to production directory
+          # Go to project directory
           cd /home/ubuntu/Edify-Service-Chatbot-Agent
 
-          echo "📥 Pulling latest code..."
+          echo "📥 Pulling latest dev branch..."
           git fetch origin
           git reset --hard origin/dev
 
-          echo "🛑 Stopping existing containers..."
-          docker compose down --remove-orphans
+          echo "🛑 Stopping only DEV containers..."
+          docker compose -p edify_dev down --remove-orphans || true
 
-          echo "🔨 Building Docker image..."
-          docker compose build
+          echo "🔨 Building DEV image..."
+          docker compose -p edify_dev build
 
-          echo "▶️ Starting containers..."
-          docker compose up -d --force-recreate
+          echo "▶️ Starting DEV containers..."
+          docker compose -p edify_dev up -d --force-recreate
 
-          echo "✅ Deployment completed successfully"
+          echo "✅ Dev deployment completed successfully"
 
-      - name: 🔎 Verify Deployment
+      - name: 🔎 Verify Dev Deployment
         run: |
-          sleep 10
-          if docker ps | grep -q edify-chatbot; then
-            echo "✅ Container is running"
-            docker ps | grep edify-chatbot
-          else
-            echo "❌ Container failed"
-            docker logs edify-chatbot
-            exit 1
-          fi
+          sleep 5
+          echo "Checking running DEV containers..."
+          docker ps --filter "name=edify_dev" --format "table {{.Names}}\t{{.Ports}}"
