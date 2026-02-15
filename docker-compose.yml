@@ -2,7 +2,12 @@ version: '3.8'
 
 services:
   chatbot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PORT: ${PORT:-8080}
+    image: edify-chatbot:latest
     container_name: edify-chatbot
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
@@ -10,20 +15,49 @@ services:
       - .env
     environment:
       - PORT=${PORT:-8080}
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request, os; port=os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request, os; port=os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
-    # Uncomment and adjust resource limits for production
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '2'
-    #       memory: 2G
-    #     reservations:
-    #       cpus: '1'
-    #       memory: 1G
+      start_period: 60s
+    # Resource limits (adjust based on your system)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    # Read-only root filesystem (except for /tmp)
+    read_only: false
+    tmpfs:
+      - /tmp
+      - /var/tmp
+    # Network configuration
+    networks:
+      - chatbot-network
+    # Labels for organization
+    labels:
+      - "com.edify.service=chatbot"
+      - "com.edify.version=1.0.0"
+      - "com.edify.description=Edify CRM Agentic AI Service"
 
+networks:
+  chatbot-network:
+    driver: bridge
+    name: edify-chatbot-network

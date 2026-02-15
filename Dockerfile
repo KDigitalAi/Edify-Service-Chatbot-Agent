@@ -1,43 +1,45 @@
-# Use Python 3.11 slim image as base
+# Use slim Python image
 FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
-# Set environment variables
+# Environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONUNBUFFERED=1
 
-# Install system dependencies
+# Install system dependencies (only if required)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    libffi-dev \
+    libssl-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
+# Copy requirements first (for caching)
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and install dependencies globally
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
-
-# Set permissions for startup script
 RUN chmod +x start.sh
+# Create non-root user (security best practice)
+RUN useradd -m appuser && chown -R appuser:appuser /app
 
-# Set default port (can be overridden via PORT environment variable)
-ARG PORT=8080
-ENV PORT=${PORT}
+USER appuser
 
-# Expose port (default 8080, configurable)
-EXPOSE ${PORT}
+# Default port
+ENV PORT=8080
 
-# Health check (uses PORT environment variable)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request, os; port=os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health')" || exit 1
+EXPOSE 8080
 
-# Run the application (port is configurable via PORT environment variable)
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+# Start application
 CMD ["./start.sh"]
 

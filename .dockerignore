@@ -67,7 +67,15 @@ vercel.json
 
 # Scripts (not needed in production container)
 scripts/
+!start.sh
 
 # Database migrations (already applied in production)
 app/migrations/
+
+# GitHub workflows (not needed in container)
+.github/
+
+# Documentation (keep README for reference)
+*.md
+!README.md
 
