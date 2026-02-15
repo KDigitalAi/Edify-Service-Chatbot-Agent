@@ -13,6 +13,18 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Check if Docker is running
+if ! docker info > /dev/null 2>&1; then
+    echo -e "${RED}❌ Error: Docker is not running!${NC}"
+    exit 1
+fi
+
+# Update and get latest code
+echo -e "${YELLOW}📥 Pulling latest code from repository...${NC}"
+git pull || {
+    echo -e "${YELLOW}⚠️  Warning: git pull failed or not in a git repository. Continuing with current code...${NC}"
+}
+
 # Check if .env file exists
 if [ ! -f .env ]; then
     echo -e "${RED}❌ Error: .env file not found!${NC}"
@@ -20,14 +32,8 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Check if Docker is running
-if ! docker info > /dev/null 2>&1; then
-    echo -e "${RED}❌ Error: Docker is not running!${NC}"
-    exit 1
-fi
-
 # Stop existing containers
-echo -e "${YELLOW}📦 Stopping existing containers...${NC}"
+echo -e "${YELLOW}📦 Stopping and removing existing containers...${NC}"
 docker-compose down 2>/dev/null || true
 
 # Build new image
