@@ -1,4 +1,4 @@
-name: Deploy Edify Chatbot Agent
+name: Dev Deployment Pipeline
 
 on:
   push:
@@ -8,11 +8,13 @@ on:
 
 jobs:
   deploy:
+    name: CI/CD Deploy to dev
     runs-on: [self-hosted, Linux]
+    if: github.ref == 'refs/heads/dev'
     timeout-minutes: 30
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
@@ -26,6 +28,9 @@ jobs:
           git clean -fd
           echo "Current commit: $(git rev-parse HEAD)"
           echo "Current branch: $(git branch --show-current)"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Detect compose directory
         id: detect
@@ -58,13 +63,33 @@ jobs:
           echo "env_file=$ENV_FILE" >> $GITHUB_OUTPUT
           echo "Using .env file at: $ENV_FILE"
 
-      - name: Stop old chatbot containers
+      - name: Remove existing Docker container (if running)
+        run: |
+          CONTAINER_NAME=edify-chatbot
+          if [ "$(docker ps -aq -f name=$CONTAINER_NAME)" ]; then
+            echo "Removing existing container: $CONTAINER_NAME"
+            docker rm -f $CONTAINER_NAME
+          else
+            echo "No existing container found: $CONTAINER_NAME"
+          fi
+
+      - name: Stop and remove containers with compose
         working-directory: ${{ steps.detect.outputs.app_path }}
         run: |
           docker compose \
             -f ${{ steps.detect.outputs.compose_file }} \
             --env-file ${{ steps.env_file.outputs.env_file }} \
             down --remove-orphans || true
+
+      - name: Remove previous Docker images (if any)
+        run: |
+          IMAGE_NAME=edify-chatbot:latest
+          if [ "$(docker images -q $IMAGE_NAME)" ]; then
+            echo "Removing previous image: $IMAGE_NAME"
+            docker rmi -f $IMAGE_NAME || true
+          else
+            echo "No existing image found: $IMAGE_NAME"
+          fi
 
       - name: Clean old Docker resources
         run: |
@@ -75,14 +100,23 @@ jobs:
           docker builder prune -a -f || true
           echo "Cleanup completed"
 
-      - name: Build and start chatbot containers
+      - name: Build latest Docker image with compose
         working-directory: ${{ steps.detect.outputs.app_path }}
         run: |
-          echo "Building and starting containers..."
+          echo "Building Docker image with compose..."
           docker compose \
             -f ${{ steps.detect.outputs.compose_file }} \
             --env-file ${{ steps.env_file.outputs.env_file }} \
-            up -d --build --force-recreate --remove-orphans
+            build --no-cache
+
+      - name: Run Docker container with compose
+        working-directory: ${{ steps.detect.outputs.app_path }}
+        run: |
+          echo "Starting containers with compose..."
+          docker compose \
+            -f ${{ steps.detect.outputs.compose_file }} \
+            --env-file ${{ steps.env_file.outputs.env_file }} \
+            up -d --force-recreate --remove-orphans
           echo "Deployment completed successfully"
 
       - name: Verify deployment
