@@ -1,63 +1,47 @@
-version: '3.8'
-
 services:
   chatbot:
+    # dev-specific container name to avoid collision with prod
+    container_name: edify-chatbot-dev
+
+    # build image locally for development; tag identifies it as dev
     build:
       context: .
       dockerfile: Dockerfile
       args:
+        # build-time default (kept for compatibility if Dockerfile uses ARG)
         PORT: ${PORT:-8080}
-    image: edify-chatbot:latest
-    container_name: edify-chatbot
+
+    image: edify-chatbot:dev
+    restart: unless-stopped
+
+    # map host 8080 -> container 8080 (internal port the app should listen on)
     ports:
-      - "${PORT:-8080}:${PORT:-8080}"
+      - "8080:8080"
+
+    # load runtime variables from .env in the repo root
     env_file:
       - .env
+
+    # explicitly set PORT for runtime so app knows which port to bind
     environment:
-      - PORT=${PORT:-8080}
-      - PYTHONUNBUFFERED=1
-      - PYTHONDONTWRITEBYTECODE=1
-    restart: unless-stopped
+      - PORT=8080
+
+    # development bind-mount so code changes reflect immediately
+    volumes:
+      - .:/app
+
+    # development command (keeps same start script)
+    command: ./start.sh
+
+    # add a lightweight healthcheck the workflow can rely on
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request, os; port=os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 60s
-    # Resource limits (adjust based on your system)
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    # Logging configuration
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        compress: "true"
-    # Security options
-    security_opt:
-      - no-new-privileges:true
-    # Read-only root filesystem (except for /tmp)
-    read_only: false
-    tmpfs:
-      - /tmp
-      - /var/tmp
-    # Network configuration
-    networks:
-      - chatbot-network
-    # Labels for organization
+
+    # useful metadata labels (optional)
     labels:
       - "com.edify.service=chatbot"
+      - "com.edify.env=dev"
       - "com.edify.version=1.0.0"
-      - "com.edify.description=Edify CRM Agentic AI Service"
-
-networks:
-  chatbot-network:
-    driver: bridge
-    name: edify-chatbot-network

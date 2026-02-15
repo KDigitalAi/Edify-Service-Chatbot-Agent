@@ -19,26 +19,31 @@ jobs:
           echo "Starting Dev Deployment"
           echo "======================================"
 
-          # Go to project directory
+          # Go to actual project directory
           cd /home/ubuntu/Edify-Service-Chatbot-Agent
 
           echo "📥 Pulling latest dev branch..."
           git fetch origin
           git reset --hard origin/dev
 
-          echo "🛑 Stopping only DEV containers..."
-          docker compose -p edify_dev down --remove-orphans || true
+          echo "🛑 Stopping ONLY dev containers..."
+          docker compose -f docker-compose.yml -p edify_dev down --remove-orphans || true
 
-          echo "🔨 Building DEV image..."
-          docker compose -p edify_dev build
+          echo "🔨 Building dev image..."
+          docker compose -f docker-compose.yml -p edify_dev build
 
-          echo "▶️ Starting DEV containers..."
-          docker compose -p edify_dev up -d --force-recreate
+          echo "▶️ Starting dev containers..."
+          docker compose -f docker-compose.yml -p edify_dev up -d --force-recreate
 
           echo "✅ Dev deployment completed successfully"
 
       - name: 🔎 Verify Dev Deployment
         run: |
-          sleep 5
-          echo "Checking running DEV containers..."
-          docker ps --filter "name=edify_dev" --format "table {{.Names}}\t{{.Ports}}"
+          echo "Waiting for container to be healthy..."
+          sleep 8
+
+          echo "Running containers:"
+          docker ps --filter "name=edify-chatbot-dev" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+          echo "Checking health endpoint on port 8080..."
+          curl -f http://localhost:8080/health || echo "⚠️ Dev health endpoint not ready yet"
